@@ -35,7 +35,7 @@ data RSSFeed = RSSFeed {rssFeedSpec :: FeedSpec, rssFeedEntries :: [RSSEntry] }
 data RSSEntry = RSSEntry {rssEntryFeedSpec :: FeedSpec, rssEntryTitle :: String, rssEntryURL :: String}
 data ContentFile = ContentFile {content :: ContentData, destinationPath :: OSPath}
 
-getRSSEntries :: [Element] -> RSSSpec -> [RSSEntry]
+getRSSEntries :: [Element] -> FeedSpec -> [RSSEntry]
 getRSSEntries top_elements rssSpec = entries where
     items = concatMap (filterElements hasLink) allItems where
 	allItems = downXMLPath ["rss", "channel", "item"] (onlyElems $ top_elements)
@@ -44,21 +44,16 @@ getRSSEntries top_elements rssSpec = entries where
     entries = [
 	RSSEntry {
 	    rssEntryTitle=defaultingChildVal "title" "Unknown" item,
-	    rssEntryURL=sureChildVal "link" item
+	    rssEntryURL=sureChildVal "link" item,
 	    rssEntryFeedSpec=rssSpec
 	} 
 	| item <- items ]
-
-getContentFiles :: RSSFeed -> IO ContentFile
-getContentFiles (RSSFeed feedSpec entries) = do
-    return contentThreads
-    return $ ContentFile {content=content, destinationPath=fromMaybe "" (feedRelPath feedSpec)}
 
 getContentFile rssEntry = do
     content <- simpleHttp $ rssEntryURL rssEntry
     return ContentFile {
 	content=content,
-	destinationPath=fromMaybe "" (feedRelPath . rssEntryFeedSpec) rssEnty
+	destinationPath=fromMaybe "" (feedRelPath . rssEntryFeedSpec) rssEntry
     }
 
 getRSSFeed :: FeedSpec -> IO RSSFeed
@@ -78,7 +73,7 @@ main = do
     rssFeeds <- mapM waitCatch rssThreads
     -- handle lefts somehow
 
-    fileThreads <- mapM (async . getContentFile) $ concatMap rssEntries rssFeeds
+    fileThreads <- mapM (async . getContentFile) $ concatMap rssFeedEntries rssFeeds
     files <- mapM waitCatch fileThreads
     -- handle lefts again somehow
 
