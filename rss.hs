@@ -5,6 +5,7 @@ import Text.XML.Light.Input
 import Text.XML.Light.Proc
 import Data.Either
 import Data.Maybe
+import qualified Data.ByteString.Lazy.Internal as BSInternal
 
 -- XML
 downXMLPath' [] elems = elems
@@ -21,24 +22,25 @@ defaultingChildVal name default_val elem = fromMaybe default_val (getVal elem) w
 	child <- findChild (unqual name) elem
 	return $ strContent child
 
+type ContentData = BSInternal.ByteString
+type OSPath = String
+type URL = String
+type FeedFile = String
+
 -- RSS
 
 -- what I define
-data FeedSpec = FeedSpec {feedName :: String, feedMaxFiles :: Int, feedRelPath :: Maybe String}
-
-type ContentData = String
-type OSPath = String
-type FeedFile = String
+data FeedSpec = FeedSpec {feedName :: String, rssFeedURL :: URL, feedMaxFiles :: Int, feedRelPath :: Maybe OSPath}
 
 -- what comes out in reality, from my definition or from the world
 data RSSFeed = RSSFeed {rssFeedSpec :: FeedSpec, rssFeedEntries :: [RSSEntry] }
-data RSSEntry = RSSEntry {rssEntryFeedSpec :: FeedSpec, rssEntryTitle :: String, rssEntryURL :: String}
-data ContentFile = ContentFile {content :: ContentData, destinationPath :: OSPath}
+data RSSEntry = RSSEntry {rssEntryFeedSpec :: FeedSpec, rssEntryTitle :: String, rssEntryURL :: URL}
+data ContentFile = ContentFile {content :: ContentData, contentRSSEntry :: RSSEntry}
 
-getRSSEntries :: [Element] -> FeedSpec -> [RSSEntry]
+getRSSEntries :: [Content] -> FeedSpec -> [RSSEntry]
 getRSSEntries top_elements rssSpec = entries where
     items = concatMap (filterElements hasLink) allItems where
-	allItems = downXMLPath ["rss", "channel", "item"] (onlyElems $ top_elements)
+	allItems = downXMLPath ["rss", "channel", "item"] (onlyElems top_elements)
 	hasLink item = isJust $ findChild (unqual "link") item
 
     entries = [
@@ -53,19 +55,21 @@ getContentFile rssEntry = do
     content <- simpleHttp $ rssEntryURL rssEntry
     return ContentFile {
 	content=content,
-	destinationPath=fromMaybe "" (feedRelPath . rssEntryFeedSpec) rssEntry
+	contentRSSEntry=rssEntry
     }
+
+-- getContentFilePath = fromMaybe "" $ (feedRelPath . rssEntryFeedSpec)
 
 getRSSFeed :: FeedSpec -> IO RSSFeed
 getRSSFeed rssSpec = do
-    feedData <- (async . simpleHttp) $ rssEntryURL rssSpec
-    return $ RSSFeed rssSpec $ getRSSEntries feedData rssSpec
+    feedData <- simpleHttp $ rssFeedURL rssSpec
+    return $ RSSFeed rssSpec $ getRSSEntries (parseXML feedData) rssSpec
 
 -- test data
 feeds = [
-	FeedSpec "http://feeds.feedburner.com/ftlradio" 2 Nothing,
-	FeedSpec "http://awkwardfistbump.libsyn.com/rss", 2, "awk/ward",
-	FeedSpec "bad_one" 2 Nothing
+	FeedSpec "Free Talk Live" "http://feeds.feedburner.com/ftlradio" 2 Nothing,
+	FeedSpec "Awkward Fist Bump" "http://awkwardfistbump.libsyn.com/rss" 2 $ Just "awk/ward",
+	FeedSpec "Nope" "bad_one" 2 Nothing
     ]
 
 main = do
@@ -73,7 +77,7 @@ main = do
     rssFeeds <- mapM waitCatch rssThreads
     -- handle lefts somehow
 
-    fileThreads <- mapM (async . getContentFile) $ concatMap rssFeedEntries rssFeeds
+    fileThreads <- mapM (async . getContentFile) $ concatMap rssFeedEntries $ rights rssFeeds
     files <- mapM waitCatch fileThreads
     -- handle lefts again somehow
 
