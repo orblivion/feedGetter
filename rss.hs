@@ -6,6 +6,7 @@ import Text.XML.Light.Proc
 import Data.Either
 import Data.Maybe
 import qualified Data.ByteString.Lazy.Internal as BSInternal
+import qualified Data.ByteString.Lazy as BSLazy
 
 -- XML
 downXMLPath' [] elems = elems
@@ -44,12 +45,12 @@ getRSSEntries top_elements rssSpec = entries where
     hasLink item = isJust $ findChild (unqual "link") item
 
     entries = [
-        RSSEntry {
-        rssEntryTitle=defaultingChildVal "title" "Unknown" item,
-        rssEntryURL=sureChildVal "link" item,
-        rssEntryFeedSpec=rssSpec
-    } 
-    | item <- items ]
+            RSSEntry {
+            rssEntryTitle=defaultingChildVal "title" "Unknown" item,
+            rssEntryURL=sureChildVal "link" item,
+            rssEntryFeedSpec=rssSpec
+        } 
+        | item <- items ]
 
 getContentFile rssEntry = do
     content <- simpleHttp $ rssEntryURL rssEntry
@@ -58,7 +59,11 @@ getContentFile rssEntry = do
     contentRSSEntry=rssEntry
     }
 
--- getContentFilePath = fromMaybe "" $ (feedRelPath . rssEntryFeedSpec)
+saveContentFile contentFile = BSLazy.writeFile (getContentFilePath contentFile) (content contentFile)
+
+getContentFilePath contentFile = "tmp"
+
+-- tmp file?
 
 getRSSFeed :: FeedSpec -> IO RSSFeed
 getRSSFeed rssSpec = do
