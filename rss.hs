@@ -19,8 +19,8 @@ sureChildVal name elem = strContent $ fromJust $ findChild (unqual "name") elem
 defaultingChildVal :: String -> String -> Element -> String
 defaultingChildVal name default_val elem = fromMaybe default_val (getVal elem) where
     getVal elem = do
-	child <- findChild (unqual name) elem
-	return $ strContent child
+    child <- findChild (unqual name) elem
+    return $ strContent child
 
 type ContentData = BSInternal.ByteString
 type OSPath = String
@@ -40,22 +40,22 @@ data ContentFile = ContentFile {content :: ContentData, contentRSSEntry :: RSSEn
 getRSSEntries :: [Content] -> FeedSpec -> [RSSEntry]
 getRSSEntries top_elements rssSpec = entries where
     items = concatMap (filterElements hasLink) allItems where
-	allItems = downXMLPath ["rss", "channel", "item"] (onlyElems top_elements)
-	hasLink item = isJust $ findChild (unqual "link") item
+        allItems = downXMLPath ["rss", "channel", "item"] (onlyElems top_elements)
+    hasLink item = isJust $ findChild (unqual "link") item
 
     entries = [
-	RSSEntry {
-	    rssEntryTitle=defaultingChildVal "title" "Unknown" item,
-	    rssEntryURL=sureChildVal "link" item,
-	    rssEntryFeedSpec=rssSpec
-	} 
-	| item <- items ]
+        RSSEntry {
+        rssEntryTitle=defaultingChildVal "title" "Unknown" item,
+        rssEntryURL=sureChildVal "link" item,
+        rssEntryFeedSpec=rssSpec
+    } 
+    | item <- items ]
 
 getContentFile rssEntry = do
     content <- simpleHttp $ rssEntryURL rssEntry
     return ContentFile {
-	content=content,
-	contentRSSEntry=rssEntry
+    content=content,
+    contentRSSEntry=rssEntry
     }
 
 -- getContentFilePath = fromMaybe "" $ (feedRelPath . rssEntryFeedSpec)
@@ -67,9 +67,9 @@ getRSSFeed rssSpec = do
 
 -- test data
 feeds = [
-	FeedSpec "Free Talk Live" "http://feeds.feedburner.com/ftlradio" 2 Nothing,
-	FeedSpec "Awkward Fist Bump" "http://awkwardfistbump.libsyn.com/rss" 2 $ Just "awk/ward",
-	FeedSpec "Nope" "bad_one" 2 Nothing
+    FeedSpec "Free Talk Live" "http://feeds.feedburner.com/ftlradio" 2 Nothing,
+    FeedSpec "Awkward Fist Bump" "http://awkwardfistbump.libsyn.com/rss" 2 $ Just "awk/ward",
+    FeedSpec "Nope" "bad_one" 2 Nothing
     ]
 
 main = do
