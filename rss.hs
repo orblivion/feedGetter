@@ -35,10 +35,10 @@ data RSSFeed = RSSFeed FeedSpec [RSSEntry]
 data RSSEntry = RSSEntry {entryFeedSpec :: FeedSpec, rssEntryTitle :: String, rssEntryURL :: String}
 data ContentFile = ContentFile {content :: ContentData, destinationPath :: OSPath}
 
-getRSSEntries :: FeedFile -> [RSSEntry]
-getRSSEntries rssFileContent = entries where
+getRSSEntries :: [Element] -> [RSSEntry]
+getRSSEntries top_elements = entries where
     items = concatMap (filterElements hasLink) allItems where
-	allItems = downXMLPath ["rss", "channel", "item"] (onlyElems $ parseXML rssFileContent)
+	allItems = downXMLPath ["rss", "channel", "item"] (onlyElems $ top_elements)
 	hasLink item = isJust $ findChild (unqual "link") item
 
     entries = [
@@ -71,7 +71,7 @@ main = do
     rssFeeds <- mapM waitCatch rssThreads
     -- handle lefts somehow
 
-    fileThreads <- mapM (async . getContentFile) ((concatMap . getRSSEntries) rssFeeds)
+    fileThreads <- mapM (async . getContentFile) rssFeeds
     files <- mapM waitCatch fileThreads
     -- handle lefts again somehow
 
