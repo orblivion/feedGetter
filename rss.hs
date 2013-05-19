@@ -1,4 +1,5 @@
 import Network.HTTP.Conduit
+import Network.URI
 import Control.Concurrent.Async
 import Text.XML.Light
 import Text.XML.Light.Input
@@ -35,7 +36,7 @@ data FeedSpec = FeedSpec {feedName :: String, rssFeedURL :: URL, feedMaxFiles ::
 
 -- what comes out in reality, from my definition or from the world
 data RSSFeed = RSSFeed {rssFeedSpec :: FeedSpec, rssFeedEntries :: [RSSEntry] }
-data RSSEntry = RSSEntry {rssEntryFeedSpec :: FeedSpec, rssEntryTitle :: String, rssEntryURL :: URL}
+data RSSEntry = RSSEntry {rssEntryFeedSpec :: FeedSpec, rssEntryTitle :: Maybe String, rssEntryURL :: URL}
 data ContentFile = ContentFile {content :: ContentData, contentRSSEntry :: RSSEntry}
 
 getRSSEntries :: [Content] -> FeedSpec -> [RSSEntry]
@@ -46,7 +47,7 @@ getRSSEntries top_elements rssSpec = entries where
 
     entries = [
             RSSEntry {
-            rssEntryTitle=defaultingChildVal "title" "Unknown" item,
+            rssEntryTitle=fmap strContent $ findChild (unqual "title") item,
             rssEntryURL=sureChildVal "link" item,
             rssEntryFeedSpec=rssSpec
         } 
@@ -61,7 +62,12 @@ getContentFile rssEntry = do
 
 saveContentFile contentFile = BSLazy.writeFile (getContentFilePath contentFile) (content contentFile)
 
-getContentFilePath contentFile = "tmp"
+getContentFilePath contentFile = map sanitize file_name where
+    -- let this error for now
+    file_name = (uriPath . fromJust . parseURI . rssEntryURL . contentRSSEntry) contentFile
+    sanitize char
+        | elem char (['a'..'z'] ++ ['A'..'Z'] ++ ['0'..'9'] ++ ".") = '_'
+        | otherwise = char
 
 -- tmp file?
 
@@ -80,10 +86,18 @@ feeds = [
 main = do
     rssThreads <- mapM (async . getRSSFeed) feeds
     rssFeeds <- mapM waitCatch rssThreads
-    -- handle lefts somehow
+
+    putStr "\n\n"
+    putStr $ "RSS Feed File Errors: " ++ ( show $ lefts rssFeeds )
+    putStr "\n\n"
 
     fileThreads <- mapM (async . getContentFile) $ concatMap rssFeedEntries $ rights rssFeeds
     files <- mapM waitCatch fileThreads
-    -- handle lefts again somehow
+
+    putStr "\n\n"
+    putStr $ "RSS Content File Errors: " ++ ( show $ lefts files )
+    putStr "\n\n"
+
+    putStr $ show $ map getContentFilePath $ rights files
 
     return ()
