@@ -16,6 +16,26 @@ findElements' = unqualifyfy findElements
 findChild' = unqualifyfy findChild
 findAttr' = unqualifyfy findAttr
 
+data SimpleXMLRepr = SElementRepr String [(String, String)] [SimpleXMLRepr] | STextRepr String | SDontCareRepr
+simpleXML' e = simpleXML $ Elem e
+simpleXML (Elem e) = SElementRepr name attrs content where
+    name = (qName . elName) e
+    attrs = map simpleAttr (elAttribs e)
+    content = map simpleXML (elContent e)
+    simpleAttr attr = (qName $ attrKey attr, attrVal attr)
+simpleXML (Text e) = STextRepr $ cdData e
+simpleXML _ = SDontCareRepr
+
+prettyShow s = show' 0 s where
+    indent ind = (take ind $ repeat ' ')
+    show' ind (SElementRepr name attrs subelems) = indent ind ++ name ++ " - " ++ attrDisp ++ "\n" ++ subElemDisp where
+        ind' = indent ind
+        attrDisp = concatMap showAttr attrs
+        subElemDisp = concatMap (show' (ind + 2)) subelems
+    show' ind (STextRepr str) = indent ind ++ "\"" ++ str ++ "\"\n"
+    show' _ SDontCareRepr = ""
+    showAttr (a, b) = a ++ "=" ++ "\"" ++ b ++ "\"" ++ " "
+
 downXMLPath' [] elems = elems
 downXMLPath' tag_name elems = concatMap (findElements' tag_name) $ elems
 
@@ -43,14 +63,15 @@ type FeedFile = String
 data FeedSpec = FeedSpec {feedName :: String, rssFeedURL :: URL, feedMaxFiles :: Int, feedRelPath :: Maybe OSPath}
 
 -- what comes out in reality, from my definition or from the world
-data RSSFeed = RSSFeed {rssFeedSpec :: FeedSpec, rssFeedEntries :: [RSSEntry] }
+data RSSFeed = RSSFeed {rssFeedSpec :: FeedSpec, rssFeedEntries :: [RSSEntry], xmlContent :: [Content]}
 data RSSEntry = RSSEntry {rssEntryFeedSpec :: FeedSpec, rssEntryTitle :: Maybe String, rssEntryURL :: URL}
 data ContentFile = ContentFile {content :: ContentData, contentRSSEntry :: RSSEntry}
 
+getItemNodes top_elements = downXMLPath ["rss", "channel", "item"] (onlyElems top_elements)
+
 getRSSEntries :: [Content] -> FeedSpec -> [RSSEntry]
 getRSSEntries top_elements rssSpec = entries where
-    items = concatMap (filterElements (isJust . getURL)) allItems where
-        allItems = downXMLPath ["rss", "channel", "item"] (onlyElems top_elements)
+    items = concatMap (filterElements (isJust . getURL)) $ getItemNodes top_elements
     getURL item = (Just item) >>= (findChild' "encloure") >>= (findAttr' "url")
 
     entries = [
@@ -82,7 +103,8 @@ getContentFilePath contentFile = map sanitize file_name where
 getRSSFeed :: FeedSpec -> IO RSSFeed
 getRSSFeed rssSpec = do
     feedData <- simpleHttp $ rssFeedURL rssSpec
-    return $ RSSFeed rssSpec $ getRSSEntries (parseXML feedData) rssSpec
+    let content = (parseXML feedData)
+    return $ RSSFeed rssSpec (getRSSEntries content rssSpec) content
 
 -- test data
 feeds = [
@@ -101,11 +123,19 @@ main = do
 
     fileThreads <- mapM (async . getContentFile) $ concatMap rssFeedEntries $ rights rssFeeds
     files <- mapM waitCatch fileThreads
-
+    
     putStr "\n\n"
     putStr $ "RSS Content File Errors: " ++ ( show $ lefts files )
     putStr "\n\n"
 
-    putStr $ show $ map getContentFilePath $ rights files
+    putStr "\n\n"
+    putStr $ "RSS Success Content File URLs: " ++ (show $ map getContentFilePath $ rights files)
+    putStr "\n\n"
+
+    let allItemNodes = rights rssFeeds >>= getItemNodes . xmlContent >>= return . simpleXML'
+    putStr "\n\n"
+    putStr $ "Item Nodes: "
+    putStr (prettyShow $ head allItemNodes)
+    putStr "\n\n"
 
     return ()
