@@ -23,7 +23,6 @@ downXMLPath :: [String] -> [Element] -> [Element]
 downXMLPath [] = id
 downXMLPath (tag_name:next_names) = (downXMLPath next_names) . (downXMLPath' tag_name)
 
-sureChildVal name elem = strContent $ fromJust $ findChild' name elem
 defaultingChildVal :: String -> String -> Element -> String
 defaultingChildVal name default_val elem = fromMaybe default_val (getVal elem) where
     getVal elem = do
@@ -31,6 +30,7 @@ defaultingChildVal name default_val elem = fromMaybe default_val (getVal elem) w
     return $ strContent child
 
 
+-- Assorted
 
 type ContentData = BSInternal.ByteString
 type OSPath = String
@@ -49,14 +49,14 @@ data ContentFile = ContentFile {content :: ContentData, contentRSSEntry :: RSSEn
 
 getRSSEntries :: [Content] -> FeedSpec -> [RSSEntry]
 getRSSEntries top_elements rssSpec = entries where
-    items = concatMap (filterElements hasLink) allItems where
+    items = concatMap (filterElements (isJust . getURL)) allItems where
         allItems = downXMLPath ["rss", "channel", "item"] (onlyElems top_elements)
-    hasLink item = isJust $ findChild' "link" item
+    getURL item = (Just item) >>= (findChild' "encloure") >>= (findAttr' "url")
 
     entries = [
             RSSEntry {
             rssEntryTitle=fmap strContent $ findChild' "title" item,
-            rssEntryURL=sureChildVal "link" item,
+            rssEntryURL=fromJust $ getURL item,
             rssEntryFeedSpec=rssSpec
         } 
         | item <- items ]
