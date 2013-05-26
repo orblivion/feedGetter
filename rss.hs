@@ -10,19 +10,27 @@ import qualified Data.ByteString.Lazy.Internal as BSInternal
 import qualified Data.ByteString.Lazy as BSLazy
 
 -- XML
+unqualifyfy f = f' where
+    f' a = f (unqual a)
+findElements' = unqualifyfy findElements
+findChild' = unqualifyfy findChild
+findAttr' = unqualifyfy findAttr
+
 downXMLPath' [] elems = elems
-downXMLPath' tag_name elems = concatMap (findElements $ unqual tag_name) $ elems
+downXMLPath' tag_name elems = concatMap (findElements' tag_name) $ elems
 
 downXMLPath :: [String] -> [Element] -> [Element]
 downXMLPath [] = id
 downXMLPath (tag_name:next_names) = (downXMLPath next_names) . (downXMLPath' tag_name)
 
-sureChildVal name elem = strContent $ fromJust $ findChild (unqual name) elem
+sureChildVal name elem = strContent $ fromJust $ findChild' name elem
 defaultingChildVal :: String -> String -> Element -> String
 defaultingChildVal name default_val elem = fromMaybe default_val (getVal elem) where
     getVal elem = do
-    child <- findChild (unqual name) elem
+    child <- findChild' name elem
     return $ strContent child
+
+
 
 type ContentData = BSInternal.ByteString
 type OSPath = String
@@ -43,11 +51,11 @@ getRSSEntries :: [Content] -> FeedSpec -> [RSSEntry]
 getRSSEntries top_elements rssSpec = entries where
     items = concatMap (filterElements hasLink) allItems where
         allItems = downXMLPath ["rss", "channel", "item"] (onlyElems top_elements)
-    hasLink item = isJust $ findChild (unqual "link") item
+    hasLink item = isJust $ findChild' "link" item
 
     entries = [
             RSSEntry {
-            rssEntryTitle=fmap strContent $ findChild (unqual "title") item,
+            rssEntryTitle=fmap strContent $ findChild' "title" item,
             rssEntryURL=sureChildVal "link" item,
             rssEntryFeedSpec=rssSpec
         } 
