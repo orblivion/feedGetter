@@ -17,7 +17,7 @@ downXMLPath :: [String] -> [Element] -> [Element]
 downXMLPath [] = id
 downXMLPath (tag_name:next_names) = (downXMLPath next_names) . (downXMLPath' tag_name)
 
-sureChildVal name elem = strContent $ fromJust $ findChild (unqual "name") elem
+sureChildVal name elem = strContent $ fromJust $ findChild (unqual name) elem
 defaultingChildVal :: String -> String -> Element -> String
 defaultingChildVal name default_val elem = fromMaybe default_val (getVal elem) where
     getVal elem = do
@@ -66,7 +66,7 @@ getContentFilePath contentFile = map sanitize file_name where
     -- let this error for now
     file_name = (uriPath . fromJust . parseURI . rssEntryURL . contentRSSEntry) contentFile
     sanitize char
-        | elem char (['a'..'z'] ++ ['A'..'Z'] ++ ['0'..'9'] ++ ".") = '_'
+        | not $ elem char (['a'..'z'] ++ ['A'..'Z'] ++ ['0'..'9'] ++ ".-") = '_'
         | otherwise = char
 
 -- tmp file?
