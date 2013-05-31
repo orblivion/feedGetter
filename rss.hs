@@ -28,13 +28,13 @@ simpleXML _ = SDontCareRepr
 
 prettyShow s = show' 0 s where
     indent ind = (take ind $ repeat ' ')
-    show' ind (SElementRepr name attrs subelems) = indent ind ++ name ++ " - " ++ attrDisp ++ "\n" ++ subElemDisp where
-        ind' = indent ind
-        attrDisp = concatMap showAttr attrs
+    show' ind (SElementRepr name attrs subelems) = indent ind ++ name ++ "\n" ++ attrDisp attrs ++ "\n" ++ subElemDisp where
+        attrDisp [] = ""
+        attrDisp attrs = concatMap showAttr attrs
+        showAttr (a, b) = indent ind ++ "  " ++ a ++ "=" ++ "\"" ++ b ++ "\"" ++ "\n"
         subElemDisp = concatMap (show' (ind + 2)) subelems
     show' ind (STextRepr str) = indent ind ++ "\"" ++ str ++ "\"\n"
     show' _ SDontCareRepr = ""
-    showAttr (a, b) = a ++ "=" ++ "\"" ++ b ++ "\"" ++ " "
 
 downXMLPath' [] elems = elems
 downXMLPath' tag_name elems = concatMap (findElements' tag_name) $ elems
@@ -134,7 +134,7 @@ main = do
 
     let allItemNodes = rights rssFeeds >>= getItemNodes . xmlContent >>= return . simpleXML'
     putStr "\n\n"
-    putStr $ "Item Nodes: "
+    putStr $ "Item Nodes: \n"
     putStr (prettyShow $ head allItemNodes)
     putStr "\n\n"
 
