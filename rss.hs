@@ -115,25 +115,30 @@ getRSSFeed rssSpec = do
 -- test data
 from_enclosure item = (findChild' "enclosure" item) >>= findAttr' "url"
 
-feeds = [
+feedSpecs = [
         FeedSpec "Free Talk Live" "http://feeds.feedburner.com/ftlradio" 2 Nothing from_enclosure,
         FeedSpec "Awkward Fist Bump" "http://awkwardfistbump.libsyn.com/rss" 2 (Just "awk/ward") from_enclosure,
         FeedSpec "Nope" "bad_one" 2 Nothing from_enclosure
     ]
 
-main = do
-    rssThreads <- mapM (async . getRSSFeed) feeds
+get_feeds feedSpecs = do
+    rssThreads <- mapM (async . getRSSFeed) feedSpecs
     rssFeeds <- mapM waitCatch rssThreads
+
+    let entries = rights rssFeeds >>= rssFeedEntries
 
     putStr "\n\n"
     putStr $ "RSS Feed File Errors: " ++ ( show $ lefts rssFeeds )
     putStr "\n\n"
 
-    let entries = rights rssFeeds >>= rssFeedEntries
-
     putStr "\n\n"
     putStr $ "RSS Entries:" ++ show ( map rssEntryURL entries )
     putStr "\n\n"
+
+    return (rssFeeds, entries)
+
+main = do
+    (rssFeeds, entries) <- get_feeds feedSpecs
 
     {-
     -- Get content files
