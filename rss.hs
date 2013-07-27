@@ -60,7 +60,13 @@ type FeedFile = String
 -- RSS
 
 -- what I define
-data FeedSpec = FeedSpec {feedName :: String, rssFeedURL :: URL, feedMaxFiles :: Int, feedRelPath :: Maybe OSPath}
+data FeedSpec = FeedSpec {
+    feedName :: String, 
+    rssFeedURL :: URL,
+    feedMaxFiles :: Int,
+    feedRelPath :: Maybe OSPath,
+    itemNodeToUrl :: Element -> Maybe String
+    }
 
 -- what comes out in reality, from my definition or from the world
 data RSSFeed = RSSFeed {rssFeedSpec :: FeedSpec, rssFeedEntries :: [RSSEntry], xmlContent :: [Content]}
@@ -72,7 +78,7 @@ getItemNodes top_elements = downXMLPath ["rss", "channel", "item"] (onlyElems to
 getRSSEntries :: [Content] -> FeedSpec -> [RSSEntry]
 getRSSEntries top_elements rssSpec = entries where
     items = concatMap (filterElements (isJust . getURL)) $ getItemNodes top_elements
-    getURL item = (Just item) >>= (findChild' "encloure") >>= (findAttr' "url")
+    getURL item = itemNodeToUrl rssSpec item
 
     entries = [
             RSSEntry {
@@ -107,10 +113,12 @@ getRSSFeed rssSpec = do
     return $ RSSFeed rssSpec (getRSSEntries content rssSpec) content
 
 -- test data
+from_enclosure item = (findChild' "enclosure" item) >>= findAttr' "url"
+
 feeds = [
-    FeedSpec "Free Talk Live" "http://feeds.feedburner.com/ftlradio" 2 Nothing,
-    FeedSpec "Awkward Fist Bump" "http://awkwardfistbump.libsyn.com/rss" 2 $ Just "awk/ward",
-    FeedSpec "Nope" "bad_one" 2 Nothing
+        FeedSpec "Free Talk Live" "http://feeds.feedburner.com/ftlradio" 2 Nothing from_enclosure,
+        FeedSpec "Awkward Fist Bump" "http://awkwardfistbump.libsyn.com/rss" 2 (Just "awk/ward") from_enclosure,
+        FeedSpec "Nope" "bad_one" 2 Nothing from_enclosure
     ]
 
 main = do
@@ -121,6 +129,14 @@ main = do
     putStr $ "RSS Feed File Errors: " ++ ( show $ lefts rssFeeds )
     putStr "\n\n"
 
+    let entries = rights rssFeeds >>= rssFeedEntries
+
+    putStr "\n\n"
+    putStr $ "RSS Entries:" ++ show ( map rssEntryURL entries )
+    putStr "\n\n"
+
+    {-
+    -- Get content files
     fileThreads <- mapM (async . getContentFile) $ concatMap rssFeedEntries $ rights rssFeeds
     files <- mapM waitCatch fileThreads
     
@@ -131,6 +147,7 @@ main = do
     putStr "\n\n"
     putStr $ "RSS Success Content File URLs: " ++ (show $ map getContentFilePath $ rights files)
     putStr "\n\n"
+    -}
 
     let allItemNodes = rights rssFeeds >>= getItemNodes . xmlContent >>= return . simpleXML'
     putStr "\n\n"
