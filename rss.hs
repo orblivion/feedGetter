@@ -152,14 +152,18 @@ get_content_files entries = do
 
     return files
 
-main = do
-    (rssFeeds, entries) <- get_feeds feedSpecs
-    files <- get_content_files entries
-
+show_item_nodes rssFeeds = do
     let allItemNodes = rights rssFeeds >>= getItemNodes . xmlContent >>= return . simpleXML'
     putStr "\n\n"
     putStr $ "Item Nodes: \n"
     putStr (prettyShow $ head allItemNodes)
-    putStr "\n\n"
+    putStr "\n\n"   
+
+    return ()
+
+main = do
+    (rssFeeds, entries) <- get_feeds feedSpecs
+    files <- get_content_files entries
+    -- show_item_nodes rssFeeds
 
     return ()
