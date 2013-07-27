@@ -137,12 +137,9 @@ get_feeds feedSpecs = do
 
     return (rssFeeds, entries)
 
-main = do
-    (rssFeeds, entries) <- get_feeds feedSpecs
-
-    {-
+get_content_files entries = do 
     -- Get content files
-    fileThreads <- mapM (async . getContentFile) $ concatMap rssFeedEntries $ rights rssFeeds
+    fileThreads <- mapM (async . getContentFile) $ entries
     files <- mapM waitCatch fileThreads
     
     putStr "\n\n"
@@ -152,7 +149,12 @@ main = do
     putStr "\n\n"
     putStr $ "RSS Success Content File URLs: " ++ (show $ map getContentFilePath $ rights files)
     putStr "\n\n"
-    -}
+
+    return files
+
+main = do
+    (rssFeeds, entries) <- get_feeds feedSpecs
+    files <- get_content_files entries
 
     let allItemNodes = rights rssFeeds >>= getItemNodes . xmlContent >>= return . simpleXML'
     putStr "\n\n"
