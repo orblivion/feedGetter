@@ -1,3 +1,3 @@
-An RSS downloader program written in Haskell. It doesn't have a "slick" interface, it just gets your damn files, and puts them where you want them. There are already programs for listening to your music.
+An RSS downloader program written in Haskell. It doesn't have a "slick" interface, it just gets your damn files, and puts them where you want them. There are already programs for listening to your audio.
 
 Actually it doesn't do that yet. But when it does, oh boy. You better watch out.
