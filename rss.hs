@@ -6,6 +6,7 @@ import Text.XML.Light.Input
 import Text.XML.Light.Proc
 import Data.Either
 import Data.Maybe
+import Data.List.Split
 import qualified Data.ByteString.Lazy.Internal as BSInternal
 import qualified Data.ByteString.Lazy as BSLazy
 
@@ -65,12 +66,18 @@ data FeedSpec = FeedSpec {
     rssFeedURL :: URL,
     feedMaxFiles :: Int,
     feedRelPath :: Maybe OSPath,
-    itemNodeToUrl :: Element -> Maybe String
+    itemNodeToFileInfo :: (Element -> Maybe String, Element -> Maybe String)
     }
+
+itemNodeToUrl = fst . itemNodeToFileInfo
+itemNodeToExtension = snd . itemNodeToFileInfo
 
 -- what comes out in reality, from my definition or from the world
 data RSSFeed = RSSFeed {rssFeedSpec :: FeedSpec, rssFeedEntries :: [RSSEntry], xmlContent :: [Content]}
-data RSSEntry = RSSEntry {rssEntryFeedSpec :: FeedSpec, rssEntryTitle :: Maybe String, rssEntryURL :: URL}
+data RSSEntry = RSSEntry {
+    rssEntryFeedSpec :: FeedSpec, rssEntryTitle :: Maybe String,
+    rssEntryURL :: URL, rssEntryElement :: Element
+}
 data ContentFile = ContentFile {content :: ContentData, contentRSSEntry :: RSSEntry}
 
 getItemNodes top_elements = downXMLPath ["rss", "channel", "item"] (onlyElems top_elements)
@@ -84,11 +91,14 @@ getRSSEntries top_elements rssSpec = entries where
             RSSEntry {
             rssEntryTitle=fmap strContent $ findChild' "title" item,
             rssEntryURL=fromJust $ getURL item,
-            rssEntryFeedSpec=rssSpec
+            rssEntryFeedSpec=rssSpec,
+            rssEntryElement=item
         } 
         | item <- items ]
 
-getContentFile rssEntry = do
+downloadContentFile rssEntry = do
+    putStr $ "Getting: " ++ rssEntryURL rssEntry ++ "\n"
+    
     content <- simpleHttp $ rssEntryURL rssEntry
     return ContentFile {
     content=content,
@@ -97,14 +107,23 @@ getContentFile rssEntry = do
 
 saveContentFile contentFile = BSLazy.writeFile (getContentFilePath contentFile) (content contentFile)
 
-getContentFilePath contentFile = map sanitize file_name where
-    -- let this error for now
-    file_name = (uriPath . fromJust . parseURI . rssEntryURL . contentRSSEntry) contentFile
-    sanitize char
+getContentFilePath contentFile = getContentFilePath' $ contentRSSEntry contentFile
+getContentFilePath' rssEntry = (sanitize . normalize_extension) raw_file_name where
+    -- let this error for now if a valid name can't be created (specifically expecting this for 
+    -- extensions)
+    raw_file_name = (last . (splitOn "/") . uriPath . fromJust . parseURI . rssEntryURL) rssEntry
+    sanitizeChar char
         | not $ elem char (['a'..'z'] ++ ['A'..'Z'] ++ ['0'..'9'] ++ ".-") = '_'
         | otherwise = char
-
--- tmp file?
+    sanitize "" = "item"
+    sanitize raw_file_name = map sanitizeChar raw_file_name
+    normalize_extension file_name
+        | has_dot && last_not_dot = file_name
+        | otherwise = file_name ++ (fromJust . elementToExtension . rssEntryElement) rssEntry
+            where
+                has_dot = elem '.' $ take 5 $ reverse $ file_name
+                last_not_dot = last file_name /= '.'
+                elementToExtension = (itemNodeToExtension . rssEntryFeedSpec $ rssEntry)
 
 getRSSFeed :: FeedSpec -> IO RSSFeed
 getRSSFeed rssSpec = do
@@ -113,7 +132,12 @@ getRSSFeed rssSpec = do
     return $ RSSFeed rssSpec (getRSSEntries content rssSpec) content
 
 -- test data
-from_enclosure item = (findChild' "enclosure" item) >>= findAttr' "url"
+from_enclosure = (getFilePath, getExtension) where
+    getFilePath item = (findChild' "enclosure" item) >>= findAttr' "url"
+    getExtension item = (findChild' "enclosure" item) >>= findAttr' "type" >>= findExtension where
+        findExtension "audio/mpeg" = Just "mp3"
+        findExtension "audio/ogg" = Just "ogg"
+        findExtension _ = Nothing
 
 feedSpecs = [
         FeedSpec "Free Talk Live" "http://feeds.feedburner.com/ftlradio" 2 Nothing from_enclosure,
@@ -132,27 +156,34 @@ get_feeds feedSpecs = do
     putStr "\n\n"
 
     putStr "\n\n"
-    putStr $ "RSS Entries:" ++ show ( map rssEntryURL entries )
+    -- putStr $ "RSS Entries:" ++ show ( map rssEntryURL entries )
     putStr "\n\n"
 
     return (rssFeeds, entries)
 
 get_content_files entries = do 
     -- Get content files
-    fileThreads <- mapM (async . getContentFile) $ entries
-    files <- mapM waitCatch fileThreads
+    fileThreads <- mapM (async . downloadContentFile) $ entries
+    contentFiles <- mapM waitCatch fileThreads
+
+    let files = rights contentFiles
     
     putStr "\n\n"
-    putStr $ "RSS Content File Errors: " ++ ( show $ lefts files )
+    putStr $ "RSS Content File Errors: " ++ ( show $ lefts contentFiles )
     putStr "\n\n"
 
     putStr "\n\n"
-    putStr $ "RSS Success Content File URLs: " ++ (show $ map getContentFilePath $ rights files)
+    putStr $ "Success Content File Paths: " ++ (show $ map getContentFilePath files)
     putStr "\n\n"
 
     return files
 
-show_item_nodes rssFeeds = do
+debug_entry_file_paths entries = do
+    putStr "\n\n"
+    putStr $ "All Content File Paths, from entries: " ++ (show $ map getContentFilePath' entries)
+    putStr "\n\n"
+
+debug_item_nodes rssFeeds = do
     let allItemNodes = rights rssFeeds >>= getItemNodes . xmlContent >>= return . simpleXML'
     putStr "\n\n"
     putStr $ "Item Nodes: \n"
@@ -163,7 +194,8 @@ show_item_nodes rssFeeds = do
 
 main = do
     (rssFeeds, entries) <- get_feeds feedSpecs
-    files <- get_content_files entries
-    -- show_item_nodes rssFeeds
+    --files <- get_content_files entries
+    files <- debug_entry_file_paths entries
+    debug_item_nodes rssFeeds
 
     return ()
