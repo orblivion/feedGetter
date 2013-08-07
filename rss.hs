@@ -7,6 +7,7 @@ import Text.XML.Light.Proc
 import Data.Either
 import Data.Maybe
 import Data.List.Split
+import System.FilePath
 import qualified Data.ByteString.Lazy.Internal as BSInternal
 import qualified Data.ByteString.Lazy as BSLazy
 
@@ -54,7 +55,6 @@ defaultingChildVal name default_val elem = fromMaybe default_val (getVal elem) w
 -- Assorted
 
 type ContentData = BSInternal.ByteString
-type OSPath = String
 type URL = String
 type FeedFile = String
 
@@ -65,7 +65,7 @@ data FeedSpec = FeedSpec {
     feedName :: String, 
     rssFeedURL :: URL,
     feedMaxFiles :: Int,
-    feedRelPath :: Maybe OSPath,
+    feedRelPath :: Maybe FilePath,
     itemNodeToFileInfo :: (Element -> Maybe String, Element -> Maybe String)
     }
 
@@ -118,11 +118,10 @@ getContentFilePath' rssEntry = (sanitize . normalize_extension) raw_file_name wh
     sanitize "" = "item"
     sanitize raw_file_name = map sanitizeChar raw_file_name
     normalize_extension file_name
-        | has_dot && last_not_dot = file_name
+        | (length extension > 5) && (length extension < 1) = file_name
         | otherwise = file_name ++ (fromJust . elementToExtension . rssEntryElement) rssEntry
             where
-                has_dot = elem '.' $ take 5 $ reverse $ file_name
-                last_not_dot = last file_name /= '.'
+                extension = (snd . splitExtension) file_name 
                 elementToExtension = (itemNodeToExtension . rssEntryFeedSpec $ rssEntry)
 
 getRSSFeed :: FeedSpec -> IO RSSFeed
