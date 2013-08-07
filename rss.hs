@@ -107,8 +107,7 @@ downloadContentFile rssEntry = do
 
 saveContentFile contentFile = BSLazy.writeFile (getContentFilePath contentFile) (content contentFile)
 
-getContentFilePath contentFile = getContentFilePath' $ contentRSSEntry contentFile
-getContentFilePath' rssEntry = (sanitize . normalize_extension) raw_file_name where
+getContentFileName rssEntry = (sanitize . normalize_extension) raw_file_name where
     -- let this error for now if a valid name can't be created (specifically expecting this for 
     -- extensions)
     raw_file_name = (last . (splitOn "/") . uriPath . fromJust . parseURI . rssEntryURL) rssEntry
@@ -118,11 +117,19 @@ getContentFilePath' rssEntry = (sanitize . normalize_extension) raw_file_name wh
     sanitize "" = "item"
     sanitize raw_file_name = map sanitizeChar raw_file_name
     normalize_extension file_name
-        | (length extension > 5) && (length extension < 1) = file_name
-        | otherwise = file_name ++ (fromJust . elementToExtension . rssEntryElement) rssEntry
+        | hasExtension file_name = file_name
+        | otherwise = addExtension file_name extension
             where
-                extension = (snd . splitExtension) file_name 
                 elementToExtension = (itemNodeToExtension . rssEntryFeedSpec $ rssEntry)
+                -- fromJust will fail if there's no extension in the file name, nor specified any
+                -- other way in the feed
+                extension = (fromJust . elementToExtension . rssEntryElement) rssEntry
+
+getContentFilePath = getContentFilePath' . contentRSSEntry
+getContentFilePath' rssEntry = addFileName contentFileDir  where
+    addFileName Nothing = (getContentFileName rssEntry)
+    addFileName (Just dirName) = combine dirName $ getContentFileName rssEntry
+    contentFileDir = (feedRelPath . rssEntryFeedSpec) rssEntry
 
 getRSSFeed :: FeedSpec -> IO RSSFeed
 getRSSFeed rssSpec = do
@@ -195,6 +202,6 @@ main = do
     (rssFeeds, entries) <- get_feeds feedSpecs
     --files <- get_content_files entries
     files <- debug_entry_file_paths entries
-    debug_item_nodes rssFeeds
+    -- debug_item_nodes rssFeeds
 
     return ()
