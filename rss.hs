@@ -107,15 +107,16 @@ downloadContentFile rssEntry = do
 
 saveContentFile contentFile = BSLazy.writeFile (getContentFilePath contentFile) (content contentFile)
 
-getContentFileName rssEntry = (sanitize . normalize_extension) raw_file_name where
-    -- let this error for now if a valid name can't be created (specifically expecting this for 
-    -- extensions)
-    raw_file_name = (last . (splitOn "/") . uriPath . fromJust . parseURI . rssEntryURL) rssEntry
+sanitizeForFileName "" = "item"
+sanitizeForFileName raw_file_name = map sanitizeChar raw_file_name where
     sanitizeChar char
         | not $ elem char (['a'..'z'] ++ ['A'..'Z'] ++ ['0'..'9'] ++ ".-") = '_'
         | otherwise = char
-    sanitize "" = "item"
-    sanitize raw_file_name = map sanitizeChar raw_file_name
+
+getContentFileName rssEntry = (sanitizeForFileName . normalize_extension) raw_file_name where
+    -- let this error for now if a valid name can't be created (specifically expecting this for 
+    -- extensions)
+    raw_file_name = (last . (splitOn "/") . uriPath . fromJust . parseURI . rssEntryURL) rssEntry
     normalize_extension file_name
         | hasExtension file_name = file_name
         | otherwise = addExtension file_name extension
@@ -126,7 +127,11 @@ getContentFileName rssEntry = (sanitize . normalize_extension) raw_file_name whe
                 extension = (fromJust . elementToExtension . rssEntryElement) rssEntry
 
 getContentFilePath = getContentFilePath' . contentRSSEntry
-getContentFilePath' rssEntry = addFileName contentFileDir  where
+getContentFilePath' rssEntry = path where
+    path = foldl combine "/" [
+        rootPath,
+        (sanitizeForFileName . feedName . rssEntryFeedSpec) rssEntry,
+        addFileName contentFileDir ]
     addFileName Nothing = (getContentFileName rssEntry)
     addFileName (Just dirName) = combine dirName $ getContentFileName rssEntry
     contentFileDir = (feedRelPath . rssEntryFeedSpec) rssEntry
@@ -150,6 +155,7 @@ feedSpecs = [
         FeedSpec "Awkward Fist Bump" "http://awkwardfistbump.libsyn.com/rss" 2 (Just "awk/ward") from_enclosure,
         FeedSpec "Nope" "bad_one" 2 Nothing from_enclosure
     ]
+rootPath = "/home/haskell/feeds"
 
 get_feeds feedSpecs = do
     rssThreads <- mapM (async . getRSSFeed) feedSpecs
