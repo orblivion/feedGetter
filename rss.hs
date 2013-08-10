@@ -11,7 +11,7 @@ import System.FilePath
 import System.Directory
 import qualified Data.ByteString.Lazy.Internal as BSInternal
 import qualified Data.ByteString.Lazy as BSLazy
-
+ 
 -- XML
 unqualifyfy f = f' where
     f' a = f (unqual a)
