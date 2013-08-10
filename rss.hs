@@ -67,7 +67,8 @@ data FeedSpec = FeedSpec {
     rssFeedURL :: URL,
     feedMaxFiles :: Int,
     feedRelPath :: Maybe FilePath,
-    itemNodeToFileInfo :: (Element -> Maybe String, Element -> Maybe String)
+    itemNodeToFileInfo :: (Element -> Maybe String, Element -> Maybe String),
+    maxEntriesToGet :: Maybe Int
     }
 
 itemNodeToUrl = fst . itemNodeToFileInfo
@@ -84,6 +85,8 @@ data ContentFile = ContentFile {
     contentRSSEntry :: RSSEntry,
     contentFileName :: FilePath
     }
+
+getLatestEntries rssFeed = take (fromMaybe 5 $ maxEntriesToGet $ rssFeedSpec rssFeed) $ rssFeedEntries rssFeed
 
 getItemNodes top_elements = downXMLPath ["rss", "channel", "item"] (onlyElems top_elements)
 
@@ -176,9 +179,9 @@ from_enclosure = (getFilePath, getExtension) where
         findExtension _ = Nothing
 
 feedSpecs = [
-        FeedSpec "Free Talk Live" "http://feeds.feedburner.com/ftlradio" 2 Nothing from_enclosure,
-        FeedSpec "Awkward Fist Bump" "http://awkwardfistbump.libsyn.com/rss" 2 (Just "awk/ward") from_enclosure,
-        FeedSpec "Nope" "bad_one" 2 Nothing from_enclosure
+        FeedSpec "Free Talk Live" "http://feeds.feedburner.com/ftlradio" 2 Nothing from_enclosure (Just 3),
+        FeedSpec "Awkward Fist Bump" "http://awkwardfistbump.libsyn.com/rss" 2 (Just "awk/ward") from_enclosure Nothing,
+        FeedSpec "Nope" "bad_one" 2 Nothing from_enclosure Nothing
     ]
 rootPath = "/home/haskell/feeds"
 
@@ -186,7 +189,7 @@ get_feeds feedSpecs = do
     rssThreads <- mapM (async . getRSSFeed) feedSpecs
     rssFeeds <- mapM waitCatch rssThreads
 
-    let entries = rights rssFeeds >>= rssFeedEntries
+    let entries = rights rssFeeds >>= getLatestEntries
 
     putStr "\n\n"
     putStr $ "RSS Feed File Errors: " ++ ( show $ lefts rssFeeds )
