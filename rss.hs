@@ -8,6 +8,7 @@ import Data.Either
 import Data.Maybe
 import Data.List.Split
 import System.FilePath
+import System.Directory
 import qualified Data.ByteString.Lazy.Internal as BSInternal
 import qualified Data.ByteString.Lazy as BSLazy
 
@@ -109,7 +110,14 @@ downloadContentFile (rssEntry, fileName) = do
         contentFileName = fileName
     }
 
-saveContentFile contentFile = BSLazy.writeFile (getContentFilePath $ contentRSSEntry contentFile) (content contentFile)
+saveContentFile contentFile = do
+    putStr $ "Saving: " ++ contentFileName contentFile ++ "\n"
+    let contentFilePath = (getContentFilePath $ contentRSSEntry contentFile)
+    let tmpContentFilePath = (contentFilePath ++ "~")
+    createDirectoryIfMissing True $ takeDirectory tmpContentFilePath
+    BSLazy.writeFile tmpContentFilePath (content contentFile)
+    renameFile tmpContentFilePath contentFilePath
+    return ()
 
 sanitizeForFileName "" = "item"
 sanitizeForFileName raw_file_name = map sanitizeChar raw_file_name where
@@ -185,7 +193,7 @@ get_feeds feedSpecs = do
     putStr "\n\n"
 
     putStr "\n\n"
-    -- putStr $ "RSS Entries:" ++ show ( map rssEntryURL entries )
+    putStr $ "RSS Entries:" ++ show ( map rssEntryURL entries )
     putStr "\n\n"
 
     return (rssFeeds, entries)
@@ -194,11 +202,15 @@ get_content_files entries = do
     let entriesFilenames = getUniqueFileNames entries
 
     -- Get content files
-    fileThreads <- mapM (async . downloadContentFile) $ zip entries entriesFilenames
+    let getContentFile (entry, entryFileName) = do
+        contentFile <- downloadContentFile (entry, entryFileName)
+        saveContentFile contentFile
+
+    fileThreads <- mapM (async . getContentFile) $ zip entries entriesFilenames
     contentFileResults <- mapM waitCatch fileThreads
 
     let contentFiles = rights contentFileResults
-    
+
     putStr "\n\n"
     putStr $ "RSS Content File Errors: " ++ ( show $ lefts contentFileResults )
     putStr "\n\n"
@@ -211,7 +223,8 @@ get_content_files entries = do
 
 debug_entry_file_paths entries = do
     putStr "\n\n"
-    putStr $ "All Content File Paths, from entries: " ++ (show $ getUniqueFileNames entries)
+    putStr $ "All Entry URLs/Content File Paths, from entries: " ++ (
+        show $ zip (map rssEntryURL entries) (getUniqueFileNames entries))
     putStr "\n\n"
 
 debug_item_nodes rssFeeds = do
@@ -225,8 +238,9 @@ debug_item_nodes rssFeeds = do
 
 main = do
     (rssFeeds, entries) <- get_feeds feedSpecs
-    --files <- get_content_files entries
-    files <- debug_entry_file_paths entries
+    files <- get_content_files entries
+
+    -- debug_entry_file_paths entries
     -- debug_item_nodes rssFeeds
 
     return ()
