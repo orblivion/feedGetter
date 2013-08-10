@@ -78,7 +78,11 @@ data RSSEntry = RSSEntry {
     rssEntryFeedSpec :: FeedSpec, rssEntryTitle :: Maybe String,
     rssEntryURL :: URL, rssEntryElement :: Element
 }
-data ContentFile = ContentFile {content :: ContentData, contentRSSEntry :: RSSEntry}
+data ContentFile = ContentFile {
+    content :: ContentData,
+    contentRSSEntry :: RSSEntry,
+    contentFileName :: FilePath
+    }
 
 getItemNodes top_elements = downXMLPath ["rss", "channel", "item"] (onlyElems top_elements)
 
@@ -96,16 +100,16 @@ getRSSEntries top_elements rssSpec = entries where
         } 
         | item <- items ]
 
-downloadContentFile rssEntry = do
+downloadContentFile (rssEntry, fileName) = do
     putStr $ "Getting: " ++ rssEntryURL rssEntry ++ "\n"
-    
     content <- simpleHttp $ rssEntryURL rssEntry
     return ContentFile {
-    content=content,
-    contentRSSEntry=rssEntry
+        content = content,
+        contentRSSEntry = rssEntry,
+        contentFileName = fileName
     }
 
-saveContentFile contentFile = BSLazy.writeFile (getContentFilePath contentFile) (content contentFile)
+saveContentFile contentFile = BSLazy.writeFile (getContentFilePath $ contentRSSEntry contentFile) (content contentFile)
 
 sanitizeForFileName "" = "item"
 sanitizeForFileName raw_file_name = map sanitizeChar raw_file_name where
@@ -126,8 +130,7 @@ getContentFileName rssEntry = (sanitizeForFileName . normalize_extension) raw_fi
                 -- other way in the feed
                 extension = (fromJust . elementToExtension . rssEntryElement) rssEntry
 
-getContentFilePath = getContentFilePath' . contentRSSEntry
-getContentFilePath' rssEntry = path where
+getContentFilePath rssEntry = path where
     path = foldl combine "/" [
         rootPath,
         (sanitizeForFileName . feedName . rssEntryFeedSpec) rssEntry,
@@ -135,6 +138,20 @@ getContentFilePath' rssEntry = path where
     addFileName Nothing = (getContentFileName rssEntry)
     addFileName (Just dirName) = combine dirName $ getContentFileName rssEntry
     contentFileDir = (feedRelPath . rssEntryFeedSpec) rssEntry
+
+getUniqueFileNames' :: [FilePath] -> [FilePath]
+getUniqueFileNames' inNames = foldl uniquify [] $ reverse inNames where
+    uniquify :: [FilePath] -> FilePath -> [FilePath]
+    uniquify names_so_far name = uniqueName:names_so_far where
+        uniqueName
+            | elem name names_so_far = (
+                replaceBaseName name 
+                $ (takeBaseName name) 
+                    ++ (show $ length names_so_far)
+            )
+            | otherwise = name
+
+getUniqueFileNames = getUniqueFileNames' . (map getContentFilePath)
 
 getRSSFeed :: FeedSpec -> IO RSSFeed
 getRSSFeed rssSpec = do
@@ -174,25 +191,27 @@ get_feeds feedSpecs = do
     return (rssFeeds, entries)
 
 get_content_files entries = do 
-    -- Get content files
-    fileThreads <- mapM (async . downloadContentFile) $ entries
-    contentFiles <- mapM waitCatch fileThreads
+    let entriesFilenames = getUniqueFileNames entries
 
-    let files = rights contentFiles
+    -- Get content files
+    fileThreads <- mapM (async . downloadContentFile) $ zip entries entriesFilenames
+    contentFileResults <- mapM waitCatch fileThreads
+
+    let contentFiles = rights contentFileResults
     
     putStr "\n\n"
-    putStr $ "RSS Content File Errors: " ++ ( show $ lefts contentFiles )
+    putStr $ "RSS Content File Errors: " ++ ( show $ lefts contentFileResults )
     putStr "\n\n"
 
     putStr "\n\n"
-    putStr $ "Success Content File Paths: " ++ (show $ map getContentFilePath files)
+    putStr $ "Success Content File Paths: " ++ (show entriesFilenames)
     putStr "\n\n"
 
-    return files
+    return contentFiles
 
 debug_entry_file_paths entries = do
     putStr "\n\n"
-    putStr $ "All Content File Paths, from entries: " ++ (show $ map getContentFilePath' entries)
+    putStr $ "All Content File Paths, from entries: " ++ (show $ getUniqueFileNames entries)
     putStr "\n\n"
 
 debug_item_nodes rssFeeds = do
