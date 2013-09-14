@@ -80,9 +80,8 @@ data RSSEntry = RSSEntry {
     rssEntryFeedSpec :: FeedSpec, rssEntryTitle :: Maybe String,
     rssEntryURL :: URL, rssEntryElement :: Element
 }
-data ContentFile = ContentFile {
+data ContentFileJob = ContentFileJob {
     content :: ContentData,
-    contentRSSEntry :: RSSEntry,
     contentFileName :: FilePath
     }
 
@@ -107,19 +106,18 @@ getRSSEntries top_elements rssSpec = entries where
 downloadContentFile (rssEntry, fileName) = do
     putStr $ "Getting: " ++ rssEntryURL rssEntry ++ "\n"
     content <- simpleHttp $ rssEntryURL rssEntry
-    return ContentFile {
+    return ContentFileJob {
         content = content,
-        contentRSSEntry = rssEntry,
         contentFileName = fileName
     }
 
 saveContentFile contentFile = do
     putStr $ "Saving: " ++ contentFileName contentFile ++ "\n"
-    let contentFilePath = (getContentFilePath $ contentRSSEntry contentFile)
-    let tmpContentFilePath = (contentFilePath ++ "~")
+    let finalContentFilePath = contentFileName contentFile
+    let tmpContentFilePath = finalContentFilePath ++ "~"
     createDirectoryIfMissing True $ takeDirectory tmpContentFilePath
     BSLazy.writeFile tmpContentFilePath (content contentFile)
-    renameFile tmpContentFilePath contentFilePath
+    renameFile tmpContentFilePath finalContentFilePath
     return ()
 
 sanitizeForFileName "" = "item"
