@@ -103,7 +103,7 @@ getRSSEntries top_elements rssSpec = entries where
         } 
         | item <- items ]
 
-downloadContentFile (rssEntry, fileName) = do
+getContentFileJob (rssEntry, fileName) = do
     putStr $ "Getting: " ++ rssEntryURL rssEntry ++ "\n"
     content <- simpleHttp $ rssEntryURL rssEntry
     return ContentFileJob {
@@ -111,12 +111,12 @@ downloadContentFile (rssEntry, fileName) = do
         contentFileName = fileName
     }
 
-saveContentFile contentFile = do
-    putStr $ "Saving: " ++ contentFileName contentFile ++ "\n"
-    let finalContentFilePath = contentFileName contentFile
+runContentFileJob contentFileJob = do
+    putStr $ "Saving: " ++ contentFileName contentFileJob ++ "\n"
+    let finalContentFilePath = contentFileName contentFileJob
     let tmpContentFilePath = finalContentFilePath ++ "~"
     createDirectoryIfMissing True $ takeDirectory tmpContentFilePath
-    BSLazy.writeFile tmpContentFilePath (content contentFile)
+    BSLazy.writeFile tmpContentFilePath (content contentFileJob)
     renameFile tmpContentFilePath finalContentFilePath
     return ()
 
@@ -202,19 +202,14 @@ get_feeds feedSpecs = do
 get_content_files entries = do 
     let entriesFilenames = getUniqueFileNames entries
 
-    -- Get content files
-    let getContentFile (entry, entryFileName) = do
-        contentFile <- downloadContentFile (entry, entryFileName)
-        saveContentFile contentFile
+    contentFileJobs <- mapM getContentFileJob $ zip entries entriesFilenames
+    contentFiles <- mapM runContentFileJob contentFileJobs
 
-    fileThreads <- mapM (async . getContentFile) $ zip entries entriesFilenames
-    contentFileResults <- mapM waitCatch fileThreads
+    --let contentFiles = rights contentFileResults
 
-    let contentFiles = rights contentFileResults
-
-    putStr "\n\n"
-    putStr $ "RSS Content File Errors: " ++ ( show $ lefts contentFileResults )
-    putStr "\n\n"
+    --putStr "\n\n"
+    --putStr $ "RSS Content File Errors: " ++ ( show $ lefts contentFileResults )
+    --putStr "\n\n"
 
     putStr "\n\n"
     putStr $ "Success Content File Paths: " ++ (show entriesFilenames)
