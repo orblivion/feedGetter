@@ -4,6 +4,7 @@ import Control.Concurrent.Async
 import Text.XML.Light
 import Text.XML.Light.Input
 import Text.XML.Light.Proc
+import Text.Groom
 import Data.Either
 import Data.Maybe
 import Data.List.Split
@@ -190,11 +191,11 @@ get_feeds feedSpecs = do
     let entries = rights rssFeeds >>= getLatestEntries
 
     putStr "\n\n"
-    putStr $ "RSS Feed File Errors: " ++ ( show $ lefts rssFeeds )
+    putStr $ "RSS Feed File Errors:\n" ++ ( groom $ lefts rssFeeds )
     putStr "\n\n"
 
     putStr "\n\n"
-    putStr $ "RSS Entries:" ++ show ( map rssEntryURL entries )
+    putStr $ "RSS Entries:\n" ++ groom ( map rssEntryURL entries )
     putStr "\n\n"
 
     return (rssFeeds, entries)
@@ -208,19 +209,19 @@ get_content_files entries = do
     --let contentFiles = rights contentFileResults
 
     --putStr "\n\n"
-    --putStr $ "RSS Content File Errors: " ++ ( show $ lefts contentFileResults )
+    --putStr $ "RSS Content File Errors: " ++ ( groom $ lefts contentFileResults )
     --putStr "\n\n"
 
     putStr "\n\n"
-    putStr $ "Success Content File Paths: " ++ (show entriesFilenames)
+    putStr $ "Success Content File Paths:\n" ++ (groom entriesFilenames)
     putStr "\n\n"
 
     return contentFiles
 
 debug_entry_file_paths entries = do
     putStr "\n\n"
-    putStr $ "All Entry URLs/Content File Paths, from entries: " ++ (
-        show $ zip (map rssEntryURL entries) (getUniqueFileNames entries))
+    putStr $ "All Entry URLs/Content File Paths, from entries: \n" ++ (
+        groom $ zip (map rssEntryURL entries) (getUniqueFileNames entries))
     putStr "\n\n"
 
 debug_item_nodes rssFeeds = do
@@ -236,7 +237,7 @@ main = do
     (rssFeeds, entries) <- get_feeds feedSpecs
     files <- get_content_files entries
 
-    -- debug_entry_file_paths entries
+    debug_entry_file_paths entries
     -- debug_item_nodes rssFeeds
 
     return ()
