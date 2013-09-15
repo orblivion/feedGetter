@@ -107,7 +107,6 @@ getRSSEntries top_elements rssSpec = entries where
         | item <- items ]
 
 getContentFileJob (rssEntry, fileName) = do
-    putStr $ "Getting: " ++ rssEntryURL rssEntry ++ "\n"
     request <- parseUrl $ rssEntryURL rssEntry
 
     return ContentFileJob {
