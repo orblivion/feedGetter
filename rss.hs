@@ -192,6 +192,22 @@ feedSpecs = [
     ]
 rootPath = "/home/haskell/feeds"
 
+maxContentFileThreads = 2
+process_content_file_jobs allJobs = do
+    initialThreads <- mapM (async . runContentFileJob) $ take maxContentFileThreads allJobs
+    process_content_file_jobs' (drop maxContentFileThreads allJobs) initialThreads []
+        where
+            process_content_file_jobs' [] [] results = return results
+            process_content_file_jobs' [] threads prevResults = do
+                (deadThread, result) <- waitAnyCatch threads 
+                let liveThreads = filter (/= deadThread) threads
+                process_content_file_jobs' [] liveThreads (result:prevResults)
+            process_content_file_jobs' (nextJob:remainingJobs) threads prevResults = do
+                (deadThread, result) <- waitAnyCatch threads 
+                let liveThreads = filter (/= deadThread) threads
+                newThread <- async $ runContentFileJob $ nextJob
+                process_content_file_jobs' remainingJobs (newThread:liveThreads) (result:prevResults)
+
 get_feeds feedSpecs = do
     rssThreads <- mapM (async . getRSSFeed) feedSpecs
     rssFeeds <- mapM waitCatch rssThreads
@@ -212,13 +228,13 @@ get_content_files entries = do
     let entriesFilenames = getUniqueFileNames entries
 
     contentFileJobs <- mapM getContentFileJob $ zip entries entriesFilenames
-    contentFiles <- mapM runContentFileJob contentFileJobs
+    contentFileResults <- process_content_file_jobs contentFileJobs
 
-    --let contentFiles = rights contentFileResults
+    let contentFiles = rights contentFileResults
 
-    --putStr "\n\n"
-    --putStr $ "RSS Content File Errors: " ++ ( groom $ lefts contentFileResults )
-    --putStr "\n\n"
+    putStr "\n\n"
+    putStr $ "RSS Content File Errors: " ++ ( groom $ lefts contentFileResults )
+    putStr "\n\n"
 
     putStr "\n\n"
     putStr $ "Success Content File Paths:\n" ++ (groom entriesFilenames)
