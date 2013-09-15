@@ -1,4 +1,6 @@
-import Network.HTTP.Conduit
+import Data.Conduit.Binary (sinkFile)
+import Network.HTTP.Conduit (http, withManager, parseUrl, simpleHttp, Request, responseBody)
+import qualified Data.Conduit as C
 import Network.URI
 import Control.Concurrent.Async
 import Text.XML.Light
@@ -81,9 +83,9 @@ data RSSEntry = RSSEntry {
     rssEntryFeedSpec :: FeedSpec, rssEntryTitle :: Maybe String,
     rssEntryURL :: URL, rssEntryElement :: Element
 }
-data ContentFileJob = ContentFileJob {
-    content :: ContentData,
-    contentFileName :: FilePath
+data ContentFileJob m = ContentFileJob {
+    contentFileJobRequest :: (Request m),
+    contentFileJobFilePath :: FilePath
     }
 
 getLatestEntries rssFeed = take (fromMaybe 5 $ maxEntriesToGet $ rssFeedSpec rssFeed) $ rssFeedEntries rssFeed
@@ -106,20 +108,27 @@ getRSSEntries top_elements rssSpec = entries where
 
 getContentFileJob (rssEntry, fileName) = do
     putStr $ "Getting: " ++ rssEntryURL rssEntry ++ "\n"
-    content <- simpleHttp $ rssEntryURL rssEntry
+    request <- parseUrl $ rssEntryURL rssEntry
+
     return ContentFileJob {
-        content = content,
-        contentFileName = fileName
+        contentFileJobRequest = request,
+        contentFileJobFilePath = fileName
     }
 
 runContentFileJob contentFileJob = do
-    putStr $ "Saving: " ++ contentFileName contentFileJob ++ "\n"
-    let finalContentFilePath = contentFileName contentFileJob
+    putStr $ "Downloading: " ++ contentFileJobFilePath contentFileJob ++ "\n"
+    let finalContentFilePath = contentFileJobFilePath contentFileJob
     let tmpContentFilePath = finalContentFilePath ++ "~"
-    createDirectoryIfMissing True $ takeDirectory tmpContentFilePath
-    BSLazy.writeFile tmpContentFilePath (content contentFileJob)
+    createDirectoryIfMissing True $ takeDirectory finalContentFilePath
+    --BSLazy.writeFile $ request contentFileJob tmpContentFilePath
+    download (contentFileJobRequest contentFileJob) tmpContentFilePath
     renameFile tmpContentFilePath finalContentFilePath
     return ()
+        where
+            download request path = do
+                withManager $ \manager -> do
+                    response <- http request manager
+                    responseBody response C.$$+- sinkFile path
 
 sanitizeForFileName "" = "item"
 sanitizeForFileName raw_file_name = map sanitizeChar raw_file_name where
