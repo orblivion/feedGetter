@@ -14,6 +14,10 @@ import System.FilePath
 import System.Directory
 import qualified Data.ByteString.Lazy.Internal as BSInternal
 import qualified Data.ByteString.Lazy as BSLazy
+import Control.Exception
+import Control.Monad
+import Control.Monad.STM
+import Control.Concurrent.STM.TChan
  
 -- XML
 unqualifyfy f = f' where
@@ -192,21 +196,20 @@ feedSpecs = [
     ]
 rootPath = "/home/haskell/feeds"
 
+mapTChan f chan = mapTChan' f chan [] where
+    mapTChan' f chan accum = do
+        maybeVal <- atomically $ tryReadTChan chan
+        case maybeVal of
+            Just value -> do
+                result <- f value
+                mapTChan' f chan (result:accum)
+            Nothing -> return $ reverse accum
+
 maxContentFileThreads = 2
-process_content_file_jobs allJobs = do
-    initialThreads <- mapM (async . runContentFileJob) $ take maxContentFileThreads allJobs
-    process_content_file_jobs' (drop maxContentFileThreads allJobs) initialThreads []
-        where
-            process_content_file_jobs' [] [] results = return results
-            process_content_file_jobs' [] threads prevResults = do
-                (deadThread, result) <- waitAnyCatch threads 
-                let liveThreads = filter (/= deadThread) threads
-                process_content_file_jobs' [] liveThreads (result:prevResults)
-            process_content_file_jobs' (nextJob:remainingJobs) threads prevResults = do
-                (deadThread, result) <- waitAnyCatch threads 
-                let liveThreads = filter (/= deadThread) threads
-                newThread <- async $ runContentFileJob $ nextJob
-                process_content_file_jobs' remainingJobs (newThread:liveThreads) (result:prevResults)
+process_content_file_jobs jobChan resultChan = mapTChan run jobChan where
+    run job = do
+        result <- try $ runContentFileJob job :: IO (Either SomeException ())
+        atomically $ writeTChan resultChan result
 
 get_feeds feedSpecs = do
     rssThreads <- mapM (async . getRSSFeed) feedSpecs
@@ -228,7 +231,14 @@ get_content_files entries = do
     let entriesFilenames = getUniqueFileNames entries
 
     contentFileJobs <- mapM getContentFileJob $ zip entries entriesFilenames
-    contentFileResults <- process_content_file_jobs contentFileJobs
+
+    jobChan <- atomically $ newTChan
+    resultChan <- atomically $ newTChan
+    mapM (atomically . (writeTChan jobChan)) contentFileJobs
+
+    contentThreads <- mapM async $ replicate maxContentFileThreads $ process_content_file_jobs jobChan resultChan
+    mapM waitCatch contentThreads
+    contentFileResults <- mapTChan return resultChan
 
     let contentFiles = rights contentFileResults
 
