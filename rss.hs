@@ -18,6 +18,7 @@ import Control.Exception
 import Control.Monad
 import Control.Monad.STM
 import Control.Concurrent.STM.TChan
+import System.Random.Shuffle
  
 -- XML
 unqualifyfy f = f' where
@@ -236,7 +237,8 @@ get_feeds feedSpecs = do
 
     return (rssFeeds, entries)
 
-get_content_files entries = do 
+get_content_files orderedEntries = do 
+    entries <- shuffleM orderedEntries
     let entriesFilenames = getUniqueFileNames entries
 
     contentFileJobs <- mapM getContentFileJob $ zip entries entriesFilenames
