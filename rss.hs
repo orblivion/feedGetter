@@ -196,20 +196,29 @@ feedSpecs = [
     ]
 rootPath = "/home/haskell/feeds"
 
-mapTChan f chan = mapTChan' f chan [] where
-    mapTChan' f chan accum = do
+relayTChan :: TChan a -> TChan b -> (a -> IO b) -> IO ()
+relayTChan fromChan toChan f = do
+    maybeVal <- atomically $ tryReadTChan fromChan
+    case maybeVal of
+        Just value -> do
+            result <- f value
+            atomically $ writeTChan toChan result
+            relayTChan fromChan toChan f
+        Nothing -> return ()
+
+collectTChan :: TChan a -> IO [a]
+collectTChan chan = collectTChan' chan [] where
+    collectTChan' chan accum = do
         maybeVal <- atomically $ tryReadTChan chan
         case maybeVal of
             Just value -> do
-                result <- f value
-                mapTChan' f chan (result:accum)
+                collectTChan' chan (value:accum)
             Nothing -> return $ reverse accum
 
+
 maxContentFileThreads = 2
-process_content_file_jobs jobChan resultChan = mapTChan run jobChan where
-    run job = do
-        result <- try $ runContentFileJob job :: IO (Either SomeException ())
-        atomically $ writeTChan resultChan result
+process_content_file_jobs jobChan resultChan = relayTChan jobChan resultChan run where
+    run job = try $ runContentFileJob job :: IO (Either SomeException ())
 
 get_feeds feedSpecs = do
     rssThreads <- mapM (async . getRSSFeed) feedSpecs
@@ -238,7 +247,7 @@ get_content_files entries = do
 
     contentThreads <- mapM async $ replicate maxContentFileThreads $ process_content_file_jobs jobChan resultChan
     mapM waitCatch contentThreads
-    contentFileResults <- mapTChan return resultChan
+    contentFileResults <- collectTChan resultChan
 
     let contentFiles = rights contentFileResults
 
