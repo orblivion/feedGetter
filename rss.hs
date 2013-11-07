@@ -1,3 +1,5 @@
+{-# LANGUAGE DeriveDataTypeable #-}
+
 import Data.Conduit.Binary (sinkFile)
 import Network.HTTP.Conduit (http, withManager, parseUrl, simpleHttp, Request, responseBody)
 import qualified Data.Conduit as C
@@ -6,19 +8,26 @@ import Control.Concurrent.Async
 import Text.XML.Light
 import Text.XML.Light.Input
 import Text.XML.Light.Proc
+import Data.Yaml.YamlLight
 import Text.Groom
 import Data.Either
 import Data.Maybe
+import Data.Map as DM
 import Data.List.Split
+import Data.Typeable
 import System.FilePath
 import System.Directory
-import qualified Data.ByteString.Lazy.Internal as BSInternal
+import qualified Data.ByteString.Lazy.Internal as BSI
+import qualified Data.ByteString.Char8 as BS8
 import qualified Data.ByteString.Lazy as BSLazy
 import Control.Exception
 import Control.Monad
+import Control.Monad.Trans
+import Control.Monad.Trans.Either
 import Control.Monad.STM
 import Control.Concurrent.STM.TChan
 import System.Random.Shuffle
+import Prelude as P
  
 -- XML
 unqualifyfy f = f' where
@@ -31,8 +40,8 @@ data SimpleXMLRepr = SElementRepr String [(String, String)] [SimpleXMLRepr] | ST
 simpleXML' e = simpleXML $ Elem e
 simpleXML (Elem e) = SElementRepr name attrs content where
     name = (qName . elName) e
-    attrs = map simpleAttr (elAttribs e)
-    content = map simpleXML (elContent e)
+    attrs = P.map simpleAttr (elAttribs e)
+    content = P.map simpleXML (elContent e)
     simpleAttr attr = (qName $ attrKey attr, attrVal attr)
 simpleXML (Text e) = STextRepr $ cdData e
 simpleXML _ = SDontCareRepr
@@ -63,25 +72,83 @@ defaultingChildVal name default_val elem = fromMaybe default_val (getVal elem) w
 
 -- Assorted
 
-type ContentData = BSInternal.ByteString
+type ContentData = BSI.ByteString
 type URL = String
 type FeedFile = String
 
--- RSS
+
+-- Yaml
+data YamlException = YamlException String
+    deriving (Show, Typeable)
+
+instance Exception YamlException
 
 -- what I define
+type FileInfoGetter = (Element -> Maybe String, Element -> Maybe String)
 data FeedSpec = FeedSpec {
     feedName :: String, 
     rssFeedURL :: URL,
-    feedMaxFiles :: Int,
     feedRelPath :: Maybe FilePath,
-    itemNodeToFileInfo :: (Element -> Maybe String, Element -> Maybe String),
+    itemNodeToFileInfo :: Maybe FileInfoGetter,
     maxEntriesToGet :: Maybe Int
     }
 
-itemNodeToUrl = fst . itemNodeToFileInfo
-itemNodeToExtension = snd . itemNodeToFileInfo
+from_enclosure :: FileInfoGetter
+from_enclosure = (getFilePath, getExtension) where
+    getFilePath item = (findChild' "enclosure" item) >>= findAttr' "url"
+    getExtension item = (findChild' "enclosure" item) >>= findAttr' "type" >>= findExtension where
+        findExtension "audio/mpeg" = Just "mp3"
+        findExtension "audio/ogg" = Just "ogg"
+        findExtension _ = Nothing
 
+getFileInfoGetter :: String -> Maybe FileInfoGetter
+getFileInfoGetter name = P.lookup name [("from_enclosure", from_enclosure)]
+
+defaultingItemNodeToFileInfo :: FeedSpec -> FileInfoGetter
+defaultingItemNodeToFileInfo = (fromMaybe from_enclosure) . itemNodeToFileInfo 
+itemNodeToUrl = fst . defaultingItemNodeToFileInfo
+itemNodeToExtension = snd . defaultingItemNodeToFileInfo
+
+errToEitherT :: a -> EitherT SomeException IO a
+errToEitherT = EitherT . try . return
+
+type EitherTIO a = EitherT SomeException IO a
+
+readFeedConfig :: FilePath -> EitherTIO [FeedSpec]
+readFeedConfig filePath = do
+    allSpecsYaml <- (EitherT . try) $ parseYamlFile filePath
+    entries <- yamlToEntries allSpecsYaml
+    mapM entryToFeedSpec entries
+        where 
+            yLookup :: [Char] -> (Map YamlLight YamlLight) -> Maybe [Char]
+            yLookup key map = do
+                yaml <- DM.lookup (YStr $ BS8.pack key) map
+                case yaml of
+                    YStr str -> return $ BS8.unpack str
+                    _ -> Nothing
+                
+            yamlToEntries :: YamlLight -> EitherTIO [(YamlLight, YamlLight)]
+            yamlToEntries (YMap entryMap) = return $ toList entryMap where
+            yamlToEntries _ = hoistEither $ Left $ SomeException $ YamlException "Badly formatted feed specification file."
+            entryToFeedSpec :: (YamlLight, YamlLight) -> EitherTIO FeedSpec
+            entryToFeedSpec ((YStr feedName), (YMap fileMap)) = do
+                -- either, not eithert. hmm.
+                url <- errToEitherT . fromJust $ yLookup "url" fileMap
+                let feedRelPath = yLookup "feedRelPath" fileMap
+                let fileInfoGetterName = yLookup "itemNodeToFileInfo" fileMap
+                let maxEntriesToGetStr = yLookup "maxEntriesToGet" fileMap
+                maxEntriesToGet <- errToEitherT $ maxEntriesToGetStr >>= Just . read
+
+                return FeedSpec {
+                  feedName = BS8.unpack feedName,
+                  rssFeedURL = url,
+                  feedRelPath = feedRelPath,
+                  itemNodeToFileInfo = fileInfoGetterName >>= getFileInfoGetter,
+                  maxEntriesToGet = maxEntriesToGet 
+                }
+            entryToFeedSpec _ = hoistEither $ Left $ SomeException $ YamlException "Badly formatted yaml entry. Are you missing a field?"
+
+-- RSS
 -- what comes out in reality, from my definition or from the world
 data RSSFeed = RSSFeed {rssFeedSpec :: FeedSpec, rssFeedEntries :: [RSSEntry], xmlContent :: [Content]}
 data RSSEntry = RSSEntry {
@@ -135,7 +202,7 @@ runContentFileJob contentFileJob = do
                     responseBody response C.$$+- sinkFile path
 
 sanitizeForFileName "" = "item"
-sanitizeForFileName raw_file_name = map sanitizeChar raw_file_name where
+sanitizeForFileName raw_file_name = P.map sanitizeChar raw_file_name where
     sanitizeChar char
         | not $ elem char (['a'..'z'] ++ ['A'..'Z'] ++ ['0'..'9'] ++ ".-") = '_'
         | otherwise = char
@@ -154,7 +221,7 @@ getContentFileName rssEntry = (sanitizeForFileName . normalize_extension) raw_fi
                 extension = (fromJust . elementToExtension . rssEntryElement) rssEntry
 
 getContentFilePath rssEntry = path where
-    path = foldl combine "/" [
+    path = P.foldl combine "/" [
         rootPath,
         (sanitizeForFileName . feedName . rssEntryFeedSpec) rssEntry,
         addFileName contentFileDir ]
@@ -163,7 +230,7 @@ getContentFilePath rssEntry = path where
     contentFileDir = (feedRelPath . rssEntryFeedSpec) rssEntry
 
 getUniqueFileNames' :: [FilePath] -> [FilePath]
-getUniqueFileNames' inNames = foldl uniquify [] $ reverse inNames where
+getUniqueFileNames' inNames = P.foldl uniquify [] $ reverse inNames where
     uniquify :: [FilePath] -> FilePath -> [FilePath]
     uniquify names_so_far name = uniqueName:names_so_far where
         uniqueName
@@ -174,7 +241,7 @@ getUniqueFileNames' inNames = foldl uniquify [] $ reverse inNames where
             )
             | otherwise = name
 
-getUniqueFileNames = getUniqueFileNames' . (map getContentFilePath)
+getUniqueFileNames = getUniqueFileNames' . (P.map getContentFilePath)
 
 getRSSFeed :: FeedSpec -> IO RSSFeed
 getRSSFeed rssSpec = do
@@ -182,18 +249,11 @@ getRSSFeed rssSpec = do
     let content = (parseXML feedData)
     return $ RSSFeed rssSpec (getRSSEntries content rssSpec) content
 
--- test data
-from_enclosure = (getFilePath, getExtension) where
-    getFilePath item = (findChild' "enclosure" item) >>= findAttr' "url"
-    getExtension item = (findChild' "enclosure" item) >>= findAttr' "type" >>= findExtension where
-        findExtension "audio/mpeg" = Just "mp3"
-        findExtension "audio/ogg" = Just "ogg"
-        findExtension _ = Nothing
 
-feedSpecs = [
-        FeedSpec "Free Talk Live" "http://feeds.feedburner.com/ftlradio" 2 Nothing from_enclosure (Just 3),
-        FeedSpec "Awkward Fist Bump" "http://awkwardfistbump.libsyn.com/rss" 2 (Just "awk/ward") from_enclosure Nothing,
-        FeedSpec "Nope" "bad_one" 2 Nothing from_enclosure Nothing
+demoFeedSpecs = [
+        FeedSpec "Free Talk Live" "http://feeds.feedburner.com/ftlradio" Nothing Nothing (Just 3),
+        FeedSpec "Awkward Fist Bump" "http://awkwardfistbump.libsyn.com/rss" (Just "awk/ward") Nothing Nothing,
+        FeedSpec "Nope" "bad_one" Nothing Nothing Nothing
     ]
 rootPath = "/home/haskell/feeds"
 
@@ -221,6 +281,7 @@ maxContentFileThreads = 2
 process_content_file_jobs jobChan resultChan = relayTChan jobChan resultChan run where
     run job = try $ runContentFileJob job :: IO (Either SomeException ())
 
+
 get_feeds feedSpecs = do
     rssThreads <- mapM (async . getRSSFeed) feedSpecs
     rssFeeds <- mapM waitCatch rssThreads
@@ -232,7 +293,7 @@ get_feeds feedSpecs = do
     putStr "\n\n"
 
     putStr "\n\n"
-    putStr $ "RSS Entries:\n" ++ groom ( map rssEntryURL entries )
+    putStr $ "RSS Entries:\n" ++ groom ( P.map rssEntryURL entries )
     putStr "\n\n"
 
     return (rssFeeds, entries)
@@ -266,7 +327,7 @@ get_content_files orderedEntries = do
 debug_entry_file_paths entries = do
     putStr "\n\n"
     putStr $ "All Entry URLs/Content File Paths, from entries: \n" ++ (
-        groom $ zip (map rssEntryURL entries) (getUniqueFileNames entries))
+        groom $ zip (P.map rssEntryURL entries) (getUniqueFileNames entries))
     putStr "\n\n"
 
 debug_item_nodes rssFeeds = do
@@ -278,11 +339,19 @@ debug_item_nodes rssFeeds = do
 
     return ()
 
+main :: IO ()
 main = do
-    (rssFeeds, entries) <- get_feeds feedSpecs
-    files <- get_content_files entries
+    result <- runEitherT $ do
+        feedSpecs <- readFeedConfig "feeds.yaml"
+        lift $ do
+            (rssFeeds, entries) <- get_feeds feedSpecs
+            files <- get_content_files entries
+            debug_entry_file_paths entries
+            -- debug_item_nodes rssFeeds
 
-    debug_entry_file_paths entries
-    -- debug_item_nodes rssFeeds
+            return ()
+    case result of
+        Left a -> putStrLn $ groom a
+        _ -> return ()
 
     return ()
