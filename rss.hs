@@ -249,12 +249,6 @@ getRSSFeed rssSpec = do
     let content = (parseXML feedData)
     return $ RSSFeed rssSpec (getRSSEntries content rssSpec) content
 
-
-demoFeedSpecs = [
-        FeedSpec "Free Talk Live" "http://feeds.feedburner.com/ftlradio" Nothing Nothing (Just 3),
-        FeedSpec "Awkward Fist Bump" "http://awkwardfistbump.libsyn.com/rss" (Just "awk/ward") Nothing Nothing,
-        FeedSpec "Nope" "bad_one" Nothing Nothing Nothing
-    ]
 rootPath = "/home/haskell/feeds"
 
 relayTChan :: TChan a -> TChan b -> (a -> IO b) -> IO ()
