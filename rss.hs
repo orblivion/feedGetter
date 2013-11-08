@@ -223,11 +223,12 @@ getContentFileName rssEntry = (sanitizeForFileName . normalize_extension) raw_fi
 getContentFilePath rssEntry = path where
     path = P.foldl combine "/" [
         rootPath,
-        (sanitizeForFileName . feedName . rssEntryFeedSpec) rssEntry,
-        addFileName contentFileDir ]
-    addFileName Nothing = (getContentFileName rssEntry)
-    addFileName (Just dirName) = combine dirName $ getContentFileName rssEntry
-    contentFileDir = (feedRelPath . rssEntryFeedSpec) rssEntry
+        addRootDir contentFileExtraDir,
+        getContentFileName rssEntry]
+    fileDir = (sanitizeForFileName . feedName . rssEntryFeedSpec) rssEntry
+    contentFileExtraDir = (feedRelPath . rssEntryFeedSpec) rssEntry
+    addRootDir Nothing = fileDir
+    addRootDir (Just extraDir) = combine extraDir fileDir
 
 getUniqueFileNames' :: [FilePath] -> [FilePath]
 getUniqueFileNames' inNames = P.foldl uniquify [] $ reverse inNames where
