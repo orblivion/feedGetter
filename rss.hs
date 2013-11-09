@@ -29,7 +29,10 @@ import Control.Concurrent.STM.TChan
 import System.Random.Shuffle
 import Prelude as P
  
--- XML
+----
+-- XML Utilities
+----
+
 unqualifyfy f = f' where
     f' a = f (unqual a)
 findElements' = unqualifyfy findElements
@@ -70,22 +73,21 @@ defaultingChildVal name default_val elem = fromMaybe default_val (getVal elem) w
     return $ strContent child
 
 
--- Assorted
+----
+-- Assorted - TODO specify
+----
+
+errToEitherT :: a -> EitherT SomeException IO a
+errToEitherT = EitherT . try . return
+type EitherTIO a = EitherT SomeException IO a
 
 type ContentData = BSI.ByteString
 type URL = String
 type FeedFile = String
 
-
--- Yaml
-data YamlException = YamlException String
-    deriving (Show, Typeable)
-
-instance Exception YamlException
-
--- what I define
+-- The structure of the feeds I specify that I want
 type FileInfoGetter = (Element -> Maybe String, Element -> Maybe String)
-data FeedSpec = FeedSpec {
+data FeedSpec = FeedSpec { 
     feedName :: String, 
     rssFeedURL :: URL,
     feedRelPath :: Maybe FilePath,
@@ -93,26 +95,15 @@ data FeedSpec = FeedSpec {
     maxEntriesToGet :: Maybe Int
     }
 
-from_enclosure :: FileInfoGetter
-from_enclosure = (getFilePath, getExtension) where
-    getFilePath item = (findChild' "enclosure" item) >>= findAttr' "url"
-    getExtension item = (findChild' "enclosure" item) >>= findAttr' "type" >>= findExtension where
-        findExtension "audio/mpeg" = Just "mp3"
-        findExtension "audio/ogg" = Just "ogg"
-        findExtension _ = Nothing
 
-getFileInfoGetter :: String -> Maybe FileInfoGetter
-getFileInfoGetter name = P.lookup name [("from_enclosure", from_enclosure)]
+----
+-- Reading Yaml configuration
+----
 
-defaultingItemNodeToFileInfo :: FeedSpec -> FileInfoGetter
-defaultingItemNodeToFileInfo = (fromMaybe from_enclosure) . itemNodeToFileInfo 
-itemNodeToUrl = fst . defaultingItemNodeToFileInfo
-itemNodeToExtension = snd . defaultingItemNodeToFileInfo
+data YamlException = YamlException String
+    deriving (Show, Typeable)
 
-errToEitherT :: a -> EitherT SomeException IO a
-errToEitherT = EitherT . try . return
-
-type EitherTIO a = EitherT SomeException IO a
+instance Exception YamlException
 
 readFeedConfig :: FilePath -> EitherTIO [FeedSpec]
 readFeedConfig filePath = do
@@ -148,8 +139,30 @@ readFeedConfig filePath = do
                 }
             entryToFeedSpec _ = hoistEither $ Left $ SomeException $ YamlException "Badly formatted yaml entry. Are you missing a field?"
 
+----
 -- RSS
--- what comes out in reality, from my definition or from the world
+----
+
+-- Some RSS-format based specifics
+
+from_enclosure :: FileInfoGetter
+from_enclosure = (getFilePath, getExtension) where
+    getFilePath item = (findChild' "enclosure" item) >>= findAttr' "url"
+    getExtension item = (findChild' "enclosure" item) >>= findAttr' "type" >>= findExtension where
+        findExtension "audio/mpeg" = Just "mp3"
+        findExtension "audio/ogg" = Just "ogg"
+        findExtension _ = Nothing
+
+getFileInfoGetter :: String -> Maybe FileInfoGetter
+getFileInfoGetter name = P.lookup name [("from_enclosure", from_enclosure)]
+
+defaultingItemNodeToFileInfo :: FeedSpec -> FileInfoGetter
+defaultingItemNodeToFileInfo = (fromMaybe from_enclosure) . itemNodeToFileInfo 
+itemNodeToUrl = fst . defaultingItemNodeToFileInfo
+itemNodeToExtension = snd . defaultingItemNodeToFileInfo
+
+-- What comes out in reality, based on my specifications
+
 data RSSFeed = RSSFeed {rssFeedSpec :: FeedSpec, rssFeedEntries :: [RSSEntry], xmlContent :: [Content]}
 data RSSEntry = RSSEntry {
     rssEntryFeedSpec :: FeedSpec, rssEntryTitle :: Maybe String,
@@ -177,6 +190,16 @@ getRSSEntries top_elements rssSpec = entries where
             rssEntryElement=item
         } 
         | item <- items ]
+
+getRSSFeed :: FeedSpec -> IO RSSFeed
+getRSSFeed rssSpec = do
+    feedData <- simpleHttp $ rssFeedURL rssSpec
+    let content = (parseXML feedData)
+    return $ RSSFeed rssSpec (getRSSEntries content rssSpec) content
+
+----
+-- Content File Getting
+----
 
 getContentFileJob (rssEntry, fileName) = do
     request <- parseUrl $ rssEntryURL rssEntry
@@ -244,14 +267,14 @@ getUniqueFileNames' inNames = P.foldl uniquify [] $ reverse inNames where
 
 getUniqueFileNames = getUniqueFileNames' . (P.map getContentFilePath)
 
-getRSSFeed :: FeedSpec -> IO RSSFeed
-getRSSFeed rssSpec = do
-    feedData <- simpleHttp $ rssFeedURL rssSpec
-    let content = (parseXML feedData)
-    return $ RSSFeed rssSpec (getRSSEntries content rssSpec) content
-
 rootPath = "/home/haskell/feeds"
 
+----
+-- Processes
+----
+
+-- Call a function f on everything coming out of fromChan and send the
+-- result to toChan
 relayTChan :: TChan a -> TChan b -> (a -> IO b) -> IO ()
 relayTChan fromChan toChan f = do
     maybeVal <- atomically $ tryReadTChan fromChan
@@ -262,6 +285,8 @@ relayTChan fromChan toChan f = do
             relayTChan fromChan toChan f
         Nothing -> return ()
 
+-- In the end we may want the results of these channeled operations for something.
+-- Collect results as the chan operations finish.
 collectTChan :: TChan a -> IO [a]
 collectTChan chan = collectTChan' chan [] where
     collectTChan' chan accum = do
@@ -271,25 +296,18 @@ collectTChan chan = collectTChan' chan [] where
                 collectTChan' chan (value:accum)
             Nothing -> return $ reverse accum
 
-
-maxContentFileThreads = 2
+-- process_content_file_jobs is one content-file-getting thread. An arbitrary
+-- amount can be spawned operating on the same channels
+maxContentFileThreads = 5
 process_content_file_jobs jobChan resultChan = relayTChan jobChan resultChan run where
     run job = try $ runContentFileJob job :: IO (Either SomeException ())
 
-
+get_feeds :: [FeedSpec] -> IO ([Either SomeException RSSFeed], [RSSEntry])
 get_feeds feedSpecs = do
     rssThreads <- mapM (async . getRSSFeed) feedSpecs
     rssFeeds <- mapM waitCatch rssThreads
 
     let entries = rights rssFeeds >>= getLatestEntries
-
-    putStr "\n\n"
-    putStr $ "RSS Feed File Errors:\n" ++ ( groom $ lefts rssFeeds )
-    putStr "\n\n"
-
-    putStr "\n\n"
-    putStr $ "RSS Entries:\n" ++ groom ( P.map rssEntryURL entries )
-    putStr "\n\n"
 
     return (rssFeeds, entries)
 
@@ -319,13 +337,28 @@ get_content_files orderedEntries = do
 
     return contentFiles
 
-debug_entry_file_paths entries = do
+----
+-- Debug Functions
+----
+
+-- Debug: Display (Entry URL) for each entry
+debug_entry_urls :: [RSSEntry] -> IO ()
+debug_entry_urls entries = do
+    putStr "\n\n"
+    putStr $ "RSS Entries:\n" ++ groom ( P.map rssEntryURL entries )
+    putStr "\n\n"
+
+-- Debug: Display (Entry URL, Entry File Path) for each entry
+debug_entry_urls_file_paths :: [RSSEntry] -> IO ()
+debug_entry_urls_file_paths entries = do
     putStr "\n\n"
     putStr $ "All Entry URLs/Content File Paths, from entries: \n" ++ (
         groom $ zip (P.map rssEntryURL entries) (getUniqueFileNames entries))
     putStr "\n\n"
 
-debug_item_nodes rssFeeds = do
+-- Debug: Displays a representation of the RSS file, for ease of finding useful elements
+debug_inspect_feed_file :: [Either SomeException RSSFeed] -> IO ()
+debug_inspect_feed_file rssFeeds = do
     let allItemNodes = rights rssFeeds >>= getItemNodes . xmlContent >>= return . simpleXML'
     putStr "\n\n"
     putStr $ "Item Nodes: \n"
@@ -334,15 +367,37 @@ debug_item_nodes rssFeeds = do
 
     return ()
 
+-- Debug: Show errors in downloading rss files.
+debug_feed_download_errors :: [Either SomeException RSSFeed] -> [FeedSpec] -> IO ()
+debug_feed_download_errors rssFeeds feedSpecs = do
+    let failedFeedSpecs = P.map snd $ P.filter (isError . fst) $ zip rssFeeds feedSpecs where
+        isError (Right a) = False
+        isError (Left a) = True
+
+    putStr "\n\n"
+    putStr $ "RSS Feed File Errors:\n" ++ ( groom $ zip (P.map feedName failedFeedSpecs) (lefts rssFeeds) )
+    putStr "\n\n"
+
+
+----
+-- Main
+----
+
 main :: IO ()
 main = do
     result <- runEitherT $ do
         feedSpecs <- readFeedConfig "feeds.yaml"
         lift $ do
             (rssFeeds, entries) <- get_feeds feedSpecs
+
+            -- uncomment as is useful for verbosity
+            -- debug_feed_download_errors rssFeeds feedSpecs
+            -- debug_feed_download_errors rssFeeds feedSpecs
+            -- debug_entry_urls entries
+            -- debug_entry_urls_file_paths entries
+            -- debug_inspect_feed_file rssFeeds
+
             files <- get_content_files entries
-            debug_entry_file_paths entries
-            -- debug_item_nodes rssFeeds
 
             return ()
     case result of
