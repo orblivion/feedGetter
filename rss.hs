@@ -210,14 +210,18 @@ getContentFileJob (rssEntry, fileName) = do
     }
 
 runContentFileJob contentFileJob = do
-    putStr $ "Downloading: " ++ contentFileJobFilePath contentFileJob ++ "\n"
     let finalContentFilePath = contentFileJobFilePath contentFileJob
     let tmpContentFilePath = finalContentFilePath ++ "~"
-    createDirectoryIfMissing True $ takeDirectory finalContentFilePath
-    --BSLazy.writeFile $ request contentFileJob tmpContentFilePath
-    download (contentFileJobRequest contentFileJob) tmpContentFilePath
-    renameFile tmpContentFilePath finalContentFilePath
-    return ()
+    alreadyHave <- doesFileExist finalContentFilePath
+    case alreadyHave of
+        True -> do
+            putStr $ "Downloading: " ++ contentFileJobFilePath contentFileJob ++ "\n"
+            createDirectoryIfMissing True $ takeDirectory finalContentFilePath
+            download (contentFileJobRequest contentFileJob) tmpContentFilePath
+            renameFile tmpContentFilePath finalContentFilePath
+            return ()
+        False -> do
+            putStr $ "Already Have: " ++ contentFileJobFilePath contentFileJob ++ "\n"
         where
             download request path = do
                 withManager $ \manager -> do
