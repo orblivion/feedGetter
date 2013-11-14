@@ -97,6 +97,15 @@ data FeedSpec = FeedSpec {
     maxEntriesToGet :: Maybe Int
     }
 
+data ShowableFeedSpec = ShowableFeedSpec {
+    feedName' :: String, 
+    rssFeedURL' :: URL,
+    feedRelPath' :: Maybe FilePath,
+    maxEntriesToGet' :: Maybe Int
+    } deriving Show
+
+instance Show FeedSpec where
+    show feedSpec = groom $ ShowableFeedSpec (feedName feedSpec) (rssFeedURL feedSpec) (feedRelPath feedSpec) (maxEntriesToGet feedSpec)
 
 ----
 -- Reading Yaml configuration
@@ -399,6 +408,8 @@ debug_feed_download_errors rssFeeds feedSpecs = do
     putStr $ "RSS Feed File Errors:\n" ++ ( groom $ zip (P.map feedName failedFeedSpecs) (lefts rssFeeds) )
     putStr "\n\n"
 
+debug_yaml_reading :: [FeedSpec] -> IO ()
+debug_yaml_reading feedSpecs = putStrLn $ groom feedSpecs
 
 ----
 -- Main
@@ -412,6 +423,7 @@ main = do
             (rssFeeds, entries) <- get_feeds feedSpecs
 
             -- uncomment as is useful for verbosity
+            debug_yaml_reading feedSpecs
             -- debug_feed_download_errors rssFeeds feedSpecs
             -- debug_entry_urls entries
             -- debug_entry_urls_file_paths entries
