@@ -77,8 +77,10 @@ defaultingChildVal name default_val elem = fromMaybe default_val (getVal elem) w
 -- Assorted - TODO specify
 ----
 
+-- Wrap any operation that throws an exception to an EitherT
 errToEitherT :: a -> EitherT SomeException IO a
 errToEitherT = EitherT . try . return
+
 type EitherTIO a = EitherT SomeException IO a
 
 type ContentData = BSI.ByteString
@@ -104,6 +106,7 @@ data YamlException = YamlException String
     deriving (Show, Typeable)
 
 instance Exception YamlException
+yamlError str = hoistEither $ Left $ SomeException $ YamlException str
 
 readFeedConfig :: FilePath -> EitherTIO [FeedSpec]
 readFeedConfig filePath = do
@@ -120,14 +123,14 @@ readFeedConfig filePath = do
                 
             yamlToEntries :: YamlLight -> EitherTIO [(YamlLight, YamlLight)]
             yamlToEntries (YMap entryMap) = return $ toList entryMap where
-            yamlToEntries _ = hoistEither $ Left $ SomeException $ YamlException "Badly formatted feed specification file."
+            yamlToEntries _ = yamlError "Badly formatted feed specification file."
             entryToFeedSpec :: (YamlLight, YamlLight) -> EitherTIO FeedSpec
             entryToFeedSpec ((YStr feedName), (YMap fileMap)) = do
                 -- either, not eithert. hmm.
                 url <- errToEitherT . fromJust $ yLookup "url" fileMap
-                let feedRelPath = yLookup "feedRelPath" fileMap
                 let fileInfoGetterName = yLookup "itemNodeToFileInfo" fileMap
                 let maxEntriesToGetStr = yLookup "maxEntriesToGet" fileMap
+                feedRelPath <- sanitizeFeedRelPath $ yLookup "feedRelPath" fileMap
                 maxEntriesToGet <- errToEitherT $ maxEntriesToGetStr >>= Just . read
 
                 return FeedSpec {
@@ -137,7 +140,7 @@ readFeedConfig filePath = do
                   itemNodeToFileInfo = fileInfoGetterName >>= getFileInfoGetter,
                   maxEntriesToGet = maxEntriesToGet 
                 }
-            entryToFeedSpec _ = hoistEither $ Left $ SomeException $ YamlException "Badly formatted yaml entry. Are you missing a field?"
+            entryToFeedSpec _ = yamlError $ "Badly formatted yaml entry. Are you missing a field?"
 
 ----
 -- RSS
@@ -228,11 +231,25 @@ runContentFileJob contentFileJob = do
                     response <- http request manager
                     responseBody response C.$$+- sinkFile path
 
+alphaNumeric = ['a'..'z'] ++ ['A'..'Z'] ++ ['0'..'9']
+
 sanitizeForFileName "" = "item"
 sanitizeForFileName raw_file_name = P.map sanitizeChar raw_file_name where
     sanitizeChar char
-        | not $ elem char (['a'..'z'] ++ ['A'..'Z'] ++ ['0'..'9'] ++ ".-") = '_'
+        | not $ elem char (alphaNumeric ++ ".-") = '_'
         | otherwise = char
+
+sanitizeFeedRelPath :: Maybe String -> EitherTIO (Maybe String) 
+sanitizeFeedRelPath Nothing = return Nothing
+sanitizeFeedRelPath (Just str) = validate $ stripRev $ stripRev $ str where
+    strip ('/':str) = strip str
+    strip str = str
+    stripRev :: String -> String
+    stripRev = strip . reverse
+    validate str
+        | length str == 0 = yamlError "feedRelPath should have a directory name"
+        | not $ all (flip elem (alphaNumeric ++ "-/")) str = yamlError "feedRelPath can only be alphanumerics and slashes" 
+        | otherwise = return $ Just str
 
 getContentFileName rssEntry = (sanitizeForFileName . normalize_extension) raw_file_name where
     -- let this error for now if a valid name can't be created (specifically expecting this for 
