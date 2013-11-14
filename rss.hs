@@ -413,7 +413,6 @@ main = do
 
             -- uncomment as is useful for verbosity
             -- debug_feed_download_errors rssFeeds feedSpecs
-            -- debug_feed_download_errors rssFeeds feedSpecs
             -- debug_entry_urls entries
             -- debug_entry_urls_file_paths entries
             -- debug_inspect_feed_file rssFeeds
