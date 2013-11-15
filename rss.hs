@@ -392,7 +392,7 @@ debug_inspect_feed_file rssFeeds = do
     let allItemNodes = rights rssFeeds >>= getItemNodes . xmlContent >>= return . simpleXML'
     putStr "\n\n"
     putStr $ "Item Nodes: \n"
-    putStr (prettyShow $ head allItemNodes)
+    putStr $ P.foldl (++) "" $ P.map prettyShow allItemNodes
     putStr "\n\n"   
 
     return ()
@@ -423,7 +423,7 @@ main = do
             (rssFeeds, entries) <- get_feeds feedSpecs
 
             -- uncomment as is useful for verbosity
-            debug_yaml_reading feedSpecs
+            -- debug_yaml_reading feedSpecs
             -- debug_feed_download_errors rssFeeds feedSpecs
             -- debug_entry_urls entries
             -- debug_entry_urls_file_paths entries
