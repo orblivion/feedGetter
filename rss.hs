@@ -227,13 +227,13 @@ runContentFileJob contentFileJob = do
     alreadyHave <- doesFileExist finalContentFilePath
     case alreadyHave of
         True -> do
-            putStr $ "Downloading: " ++ contentFileJobFilePath contentFileJob ++ "\n"
+            putStr $ "Downloading: " ++ finalContentFilePath ++ "\n"
             createDirectoryIfMissing True $ takeDirectory finalContentFilePath
             download (contentFileJobRequest contentFileJob) tmpContentFilePath
             renameFile tmpContentFilePath finalContentFilePath
             return ()
         False -> do
-            putStr $ "Already Have: " ++ contentFileJobFilePath contentFileJob ++ "\n"
+            putStr $ "Already Have: " ++ finalContentFilePath ++ "\n"
         where
             download request path = do
                 withManager $ \manager -> do
