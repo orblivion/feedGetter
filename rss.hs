@@ -182,17 +182,24 @@ data RSSEntry = RSSEntry {
     rssEntryURL :: URL, rssEntryElement :: Element
 } deriving Show
 type RSSEntryError = (RSSEntry, SomeException)
-data ContentFileJob m = ContentFileJob {
+data ContentFileJob' m = ContentFileJob' {
     contentFileJobRSSEntry :: RSSEntry,
     contentFileJobRequest  :: (Request m),
     contentFileJobFilePath :: FilePath
     }
-type ContentFileJob' = ContentFileJob (C.ResourceT IO)
+type ContentFileJob = ContentFileJob' (C.ResourceT IO)
 
+-- Given an RSS Feed, grab the latest entries
+getLatestEntries :: RSSFeed -> [RSSEntry]
 getLatestEntries rssFeed = take (fromMaybe 5 $ maxEntriesToGet $ rssFeedSpec rssFeed) $ rssFeedEntries rssFeed
 
+-- Starting from the top level elements (representations of XML data), return a
+-- list of the lower level elements within, which each represent a single rss
+-- entry
+getItemNodes :: [Content] -> [Element]
 getItemNodes top_elements = downXMLPath ["rss", "channel", "item"] (onlyElems top_elements)
 
+-- Given a representation of XML nodes, return a list of RSS entry structures
 getRSSEntries :: [Content] -> FeedSpec -> [RSSEntry]
 getRSSEntries top_elements rssSpec = entries where
     items = concatMap (filterElements (isJust . getURL)) $ getItemNodes top_elements
@@ -207,6 +214,7 @@ getRSSEntries top_elements rssSpec = entries where
         } 
         | item <- items ]
 
+-- Given a FeedSpec, download the feed file.
 getRSSFeed :: FeedSpec -> IO RSSFeed
 getRSSFeed rssSpec = do
     feedData <- simpleHttp $ rssFeedURL rssSpec
@@ -217,18 +225,22 @@ getRSSFeed rssSpec = do
 -- Content File Getting
 ----
 
-getContentFileJob :: (RSSEntry, String) -> IO (Either RSSEntryError ContentFileJob') 
+-- Given an RSSEntry, and a file name, create a ContentFileJob structure
+getContentFileJob :: (RSSEntry, String) -> IO (Either RSSEntryError ContentFileJob) 
 getContentFileJob (rssEntry, fileName) = do
     eitherRequest <- try $ parseUrl $ rssEntryURL rssEntry
     case eitherRequest of
         Left exception -> return $ Left (rssEntry, exception)
-        Right request -> return $ Right $ ContentFileJob {
+        Right request -> return $ Right $ ContentFileJob' {
             contentFileJobRSSEntry = rssEntry,
             contentFileJobRequest = request,
             contentFileJobFilePath = fileName
         }
 
-runContentFileJob :: ContentFileJob' -> IO ()
+-- ContentFileJob has the URL to grab from and the file path to save to. This
+-- function does the job. It creates a temporary file until the download is
+-- complete, and it skips any files that are already there.
+runContentFileJob :: ContentFileJob -> IO ()
 runContentFileJob contentFileJob = do
     let finalContentFilePath = contentFileJobFilePath contentFileJob
     let tmpContentFilePath = finalContentFilePath ++ "~"
@@ -353,9 +365,9 @@ collectTChan chan = collectTChan' chan [] where
 -- get it, puts the result into the result channel, and starts over. An arbitrary
 -- number of these threads can be spawned operating on the same channels
 maxContentFileThreads = 5
-process_content_file_jobs :: TChan ContentFileJob' -> TChan ( Either RSSEntryError RSSEntry) -> IO ()
+process_content_file_jobs :: TChan ContentFileJob -> TChan ( Either RSSEntryError RSSEntry) -> IO ()
 process_content_file_jobs jobChan resultChan = relayTChan jobChan resultChan run where
-    run :: ContentFileJob' -> IO (Either RSSEntryError RSSEntry)
+    run :: ContentFileJob -> IO (Either RSSEntryError RSSEntry)
     run job = do
         result <- try $ runContentFileJob job
         let entry = contentFileJobRSSEntry job
