@@ -226,13 +226,13 @@ runContentFileJob contentFileJob = do
     let tmpContentFilePath = finalContentFilePath ++ "~"
     alreadyHave <- doesFileExist finalContentFilePath
     case alreadyHave of
-        True -> do
+        False -> do
             putStr $ "Downloading: " ++ finalContentFilePath ++ "\n"
             createDirectoryIfMissing True $ takeDirectory finalContentFilePath
             download (contentFileJobRequest contentFileJob) tmpContentFilePath
             renameFile tmpContentFilePath finalContentFilePath
             return ()
-        False -> do
+        True -> do
             putStr $ "Already Have: " ++ finalContentFilePath ++ "\n"
         where
             download request path = do
