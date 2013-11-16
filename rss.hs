@@ -346,6 +346,7 @@ process_content_file_jobs jobChan resultChan = relayTChan jobChan resultChan run
             Left exception -> return $ Left (entry, exception)
             Right _ -> return $ Right entry
 
+-- Get the Feed Files (rss, atom)
 get_feeds :: [FeedSpec] -> IO ([Either SomeException RSSFeed], [RSSEntry])
 get_feeds feedSpecs = do
     rssThreads <- mapM (async . getRSSFeed) feedSpecs
@@ -355,6 +356,8 @@ get_feeds feedSpecs = do
 
     return (rssFeeds, entries)
 
+-- Get the Content Files (mp3, ogg)
+get_content_files :: [RSSEntry] -> IO ([RSSEntry], [RSSEntryError])
 get_content_files orderedEntries = do 
     entries <- shuffleM orderedEntries
     let entriesFilenames = getUniqueFileNames entries
