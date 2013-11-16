@@ -463,15 +463,6 @@ debug_inspect_feed_file rssFeeds = do
 
     return ()
 
--- Debug: Show errors in downloading rss files.
-debug_feed_download_errors :: [FeedSpecError] -> IO ()
-debug_feed_download_errors errorFeedSpecs = do
-    let get_display (feedSpec, exception) = (feedName feedSpec, exception)
-
-    putStr "\n\n"
-    putStr $ "RSS Feed File Errors:\n" ++ (groom $ P.map get_display errorFeedSpecs)
-    putStr "\n\n"
-
 -- Debug: Display the FeedSpecs derived from the yaml file
 debug_yaml_reading :: [FeedSpec] -> IO ()
 debug_yaml_reading feedSpecs = putStrLn $ groom feedSpecs
@@ -499,6 +490,16 @@ debug_entry_successes successRSSEntries = do
     putStr $ "RSS Content File Successes (Including skips from already having them):" ++ ( groom $ P.map rssEntryURL successRSSEntries )
     putStr "\n\n"
 
+-- Debug: Show errors in downloading rss files.
+debug_feed_file_errors :: [FeedSpecError] -> IO ()
+debug_feed_file_errors errorFeedSpecs = do
+    let showErr (feedSpec, error) = (feedName feedSpec, (take 100 $ show error) ++ "...")
+
+    putStr "\n\n"
+    putStr $ "RSS Feed File Errors:\n" ++ (groom $ P.map showErr errorFeedSpecs)
+    putStr "\n\n"
+
+
 debug_entry_errors :: [RSSEntryError] -> IO ()
 debug_entry_errors errorRSSEntries = do
     let showErr (entry, error) = (rssEntryURL entry, (take 100 $ show error) ++ "...")
@@ -525,9 +526,9 @@ main = do
             case True of
                 True -> do -- enabled debug
                     debug_entry_errors errorEntries
+                    debug_feed_file_errors errorFeedSpecs
                 False -> do -- disabled debug, but still subject to type checking
                     debug_yaml_reading feedSpecs
-                    debug_feed_download_errors errorFeedSpecs
                     debug_entry_urls entries
                     debug_entry_urls_file_paths entries
                     debug_inspect_feed_file successRSSFeeds
