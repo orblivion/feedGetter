@@ -18,7 +18,6 @@ import Data.List
 import Data.Typeable
 import System.FilePath
 import System.Directory
-import qualified Data.ByteString.Lazy.Internal as BSI
 import qualified Data.ByteString.Char8 as BS8
 import qualified Data.ByteString.Lazy as BSLazy
 import Control.Exception
@@ -30,6 +29,20 @@ import Control.Concurrent.STM.TChan
 import System.Random.Shuffle
 import Prelude as P
  
+----
+-- General Utilities
+----
+
+-- A commonly used type signature
+type EitherTIO a = EitherT SomeException IO a
+
+-- Wrap any operation that throws an exception to an EitherTIO
+errToEitherT :: a -> EitherTIO a
+errToEitherT = EitherT . try . return
+
+-- Used in a couple different structs
+type URL = String
+
 ----
 -- XML Utilities
 ----
@@ -86,19 +99,10 @@ downXMLPath (tag_name:next_names) = (downXMLPath next_names) . (downXMLPath' tag
 downXMLPath' [] elems = elems
 downXMLPath' tag_name elems = concatMap (findElements' tag_name) $ elems
 
+
 ----
--- Assorted - TODO specify
+-- Feed Specification
 ----
-
--- Wrap any operation that throws an exception to an EitherT
-errToEitherT :: a -> EitherT SomeException IO a
-errToEitherT = EitherT . try . return
-
-type EitherTIO a = EitherT SomeException IO a
-
-type ContentData = BSI.ByteString
-type URL = String
-type FeedFile = String
 
 -- The structure of the feeds I specify that I want
 type FileInfoGetter = (Element -> Maybe String, Element -> Maybe String)
@@ -120,9 +124,7 @@ data ShowableFeedSpec = ShowableFeedSpec {
 instance Show FeedSpec where
     show feedSpec = groom $ ShowableFeedSpec (feedName feedSpec) (rssFeedURL feedSpec) (feedRelPath feedSpec) (maxEntriesToGet feedSpec)
 
-----
 -- Reading Yaml configuration
-----
 
 data YamlException = YamlException String
     deriving (Show, Typeable)
