@@ -334,9 +334,12 @@ collectTChan chan = collectTChan' chan [] where
                 collectTChan' chan (value:accum)
             Nothing -> return $ reverse accum
 
--- process_content_file_jobs is one content-file-getting thread. An arbitrary
--- amount can be spawned operating on the same channels
+-- process_content_file_jobs is a single content-file-getting thread. It grabs
+-- a content file job from the job channel (or quits if none are left), tries to
+-- get it, puts the result into the result channel, and starts over. An arbitrary
+-- number of these threads can be spawned operating on the same channels
 maxContentFileThreads = 5
+process_content_file_jobs :: TChan ContentFileJob' -> TChan ( Either RSSEntryError RSSEntry) -> IO ()
 process_content_file_jobs jobChan resultChan = relayTChan jobChan resultChan run where
     run :: ContentFileJob' -> IO (Either RSSEntryError RSSEntry)
     run job = do
