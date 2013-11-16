@@ -520,7 +520,6 @@ main = do
         lift $ do
             (successRSSFeeds, errorFeedSpecs, entries) <- get_feeds feedSpecs
             (successEntries, errorEntries) <- get_content_files entries
-            -- TODO debug out for errorRSSFeeds
 
             -- uncomment as is useful for verbosity
             case True of
