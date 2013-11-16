@@ -200,6 +200,7 @@ data RSSEntry = RSSEntry {
     rssEntryFeedSpec :: FeedSpec, rssEntryTitle :: Maybe String,
     rssEntryURL :: URL, rssEntryElement :: Element
 } deriving Show
+type FeedSpecError = (FeedSpec, SomeException)
 type RSSEntryError = (RSSEntry, SomeException)
 data ContentFileJob' m = ContentFileJob' {
     contentFileJobRSSEntry :: RSSEntry,
@@ -236,6 +237,7 @@ getRSSEntries top_elements rssSpec = entries where
 -- Given a FeedSpec, download the feed file.
 getRSSFeed :: FeedSpec -> IO RSSFeed
 getRSSFeed rssSpec = do
+    putStr $ "Downloading Feed: " ++ (rssFeedURL rssSpec) ++ "\n"
     feedData <- simpleHttp $ rssFeedURL rssSpec
     let content = (parseXML feedData)
     return $ RSSFeed rssSpec (getRSSEntries content rssSpec) content
@@ -356,6 +358,8 @@ rootPath = "/home/haskell/feeds"
 -- Processes
 ----
 
+maxDownloadThreads = 5
+
 -- Call a function f on everything coming out of fromChan and send the
 -- result to toChan
 relayTChan :: TChan a -> TChan b -> (a -> IO b) -> IO ()
@@ -379,11 +383,24 @@ collectTChan chan = collectTChan' chan [] where
                 collectTChan' chan (value:accum)
             Nothing -> return $ reverse accum
 
+
+-- process_rss_feed_downloads is a single rss-file-getting thread. It grabs
+-- a feed spec from the job channel (or quits if none are left), tries to
+-- get the feed file, puts the result into the result channel, and starts over. An
+-- arbitrary number of these threads can be spawned operating on the same channels
+process_rss_feed_downloads :: TChan FeedSpec -> TChan ( Either FeedSpecError RSSFeed) -> IO ()
+process_rss_feed_downloads jobChan resultChan = relayTChan jobChan resultChan run where
+    run :: FeedSpec -> IO (Either FeedSpecError RSSFeed)
+    run feedSpec = do
+        result <- try $ getRSSFeed feedSpec
+        case result of
+            Left exception -> return $ Left (feedSpec, exception)
+            Right rssFeed -> return $ Right rssFeed
+
 -- process_content_file_jobs is a single content-file-getting thread. It grabs
 -- a content file job from the job channel (or quits if none are left), tries to
 -- get it, puts the result into the result channel, and starts over. An arbitrary
 -- number of these threads can be spawned operating on the same channels
-maxContentFileThreads = 5
 process_content_file_jobs :: TChan ContentFileJob -> TChan ( Either RSSEntryError RSSEntry) -> IO ()
 process_content_file_jobs jobChan resultChan = relayTChan jobChan resultChan run where
     run :: ContentFileJob -> IO (Either RSSEntryError RSSEntry)
@@ -395,14 +412,21 @@ process_content_file_jobs jobChan resultChan = relayTChan jobChan resultChan run
             Right _ -> return $ Right entry
 
 -- Get the Feed Files (rss, atom)
-get_feeds :: [FeedSpec] -> IO ([Either SomeException RSSFeed], [RSSEntry])
+get_feeds :: [FeedSpec] -> IO ([RSSFeed], [FeedSpecError], [RSSEntry])
 get_feeds feedSpecs = do
-    rssThreads <- mapM (async . getRSSFeed) feedSpecs
-    rssFeeds <- mapM waitCatch rssThreads
+    jobChan <- atomically $ newTChan
+    resultChan <- atomically $ newTChan
+    mapM (atomically . (writeTChan jobChan)) $ feedSpecs
 
-    let entries = rights rssFeeds >>= getLatestEntries
+    rssThreads <- mapM async $ replicate maxDownloadThreads $ process_rss_feed_downloads jobChan resultChan
+    mapM waitCatch rssThreads
+    rssFeedResults <- collectTChan resultChan
 
-    return (rssFeeds, entries)
+    let successRSSFeeds = rights rssFeedResults
+    let errorFeedSpecs = lefts rssFeedResults
+    let entries = successRSSFeeds >>= getLatestEntries
+
+    return (successRSSFeeds, errorFeedSpecs, entries)
 
 -- Get the Content Files (mp3, ogg)
 get_content_files :: [RSSEntry] -> IO ([RSSEntry], [RSSEntryError])
@@ -416,7 +440,7 @@ get_content_files orderedEntries = do
     resultChan <- atomically $ newTChan
     mapM (atomically . (writeTChan jobChan)) $ rights contentFileJobs
 
-    contentThreads <- mapM async $ replicate maxContentFileThreads $ process_content_file_jobs jobChan resultChan
+    contentThreads <- mapM async $ replicate maxDownloadThreads $ process_content_file_jobs jobChan resultChan
     mapM waitCatch contentThreads
     contentFileResults <- collectTChan resultChan
 
@@ -429,9 +453,9 @@ get_content_files orderedEntries = do
 ----
 
 -- Debug: Displays a representation of the RSS file, for ease of finding useful elements
-debug_inspect_feed_file :: [Either SomeException RSSFeed] -> IO ()
+debug_inspect_feed_file :: [RSSFeed] -> IO ()
 debug_inspect_feed_file rssFeeds = do
-    let allItemNodes = rights rssFeeds >>= getItemNodes . xmlContent >>= return . simpleXML'
+    let allItemNodes = rssFeeds >>= getItemNodes . xmlContent >>= return . simpleXML'
     putStr "\n\n"
     putStr $ "Item Nodes: \n"
     putStr $ P.foldl (++) "" $ P.map prettyShowNodes allItemNodes
@@ -440,14 +464,12 @@ debug_inspect_feed_file rssFeeds = do
     return ()
 
 -- Debug: Show errors in downloading rss files.
-debug_feed_download_errors :: [Either SomeException RSSFeed] -> [FeedSpec] -> IO ()
-debug_feed_download_errors rssFeeds feedSpecs = do
-    let failedFeedSpecs = P.map snd $ P.filter (isError . fst) $ zip rssFeeds feedSpecs where
-        isError (Right a) = False
-        isError (Left a) = True
+debug_feed_download_errors :: [FeedSpecError] -> IO ()
+debug_feed_download_errors errorFeedSpecs = do
+    let get_display (feedSpec, exception) = (feedName feedSpec, exception)
 
     putStr "\n\n"
-    putStr $ "RSS Feed File Errors:\n" ++ ( groom $ zip (P.map feedName failedFeedSpecs) (lefts rssFeeds) )
+    putStr $ "RSS Feed File Errors:\n" ++ (groom $ P.map get_display errorFeedSpecs)
     putStr "\n\n"
 
 -- Debug: Display the FeedSpecs derived from the yaml file
@@ -474,7 +496,7 @@ debug_entry_urls_file_paths entries = do
 debug_entry_successes :: [RSSEntry] -> IO ()
 debug_entry_successes successRSSEntries = do
     putStr "\n\n"
-    putStr $ "RSS Content File Successes:" ++ ( groom $ P.map rssEntryURL successRSSEntries )
+    putStr $ "RSS Content File Successes (Including skips from already having them):" ++ ( groom $ P.map rssEntryURL successRSSEntries )
     putStr "\n\n"
 
 debug_entry_errors :: [RSSEntryError] -> IO ()
@@ -495,17 +517,21 @@ main = do
     result <- runEitherT $ do
         feedSpecs <- readFeedConfig "feeds.yaml"
         lift $ do
-            (rssFeeds, entries) <- get_feeds feedSpecs
+            (successRSSFeeds, errorFeedSpecs, entries) <- get_feeds feedSpecs
             (successEntries, errorEntries) <- get_content_files entries
+            -- TODO debug out for errorRSSFeeds
 
             -- uncomment as is useful for verbosity
-            -- debug_yaml_reading feedSpecs
-            -- debug_feed_download_errors rssFeeds feedSpecs
-            -- debug_entry_urls entries
-            -- debug_entry_urls_file_paths entries
-            -- debug_inspect_feed_file rssFeeds
-            -- debug_entry_successes successEntries
-            debug_entry_errors errorEntries
+            case True of
+                True -> do -- enabled debug
+                    debug_entry_errors errorEntries
+                False -> do -- disabled debug, but still subject to type checking
+                    debug_yaml_reading feedSpecs
+                    debug_feed_download_errors errorFeedSpecs
+                    debug_entry_urls entries
+                    debug_entry_urls_file_paths entries
+                    debug_inspect_feed_file successRSSFeeds
+                    debug_entry_successes successEntries
 
             return ()
     case result of
