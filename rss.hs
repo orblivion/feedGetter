@@ -14,6 +14,7 @@ import Data.Either
 import Data.Maybe
 import Data.Map as DM
 import Data.List.Split
+import Data.List
 import Data.Typeable
 import System.FilePath
 import System.Directory
@@ -179,11 +180,13 @@ data RSSFeed = RSSFeed {rssFeedSpec :: FeedSpec, rssFeedEntries :: [RSSEntry], x
 data RSSEntry = RSSEntry {
     rssEntryFeedSpec :: FeedSpec, rssEntryTitle :: Maybe String,
     rssEntryURL :: URL, rssEntryElement :: Element
-}
+} deriving Show
 data ContentFileJob m = ContentFileJob {
-    contentFileJobRequest :: (Request m),
+    contentFileJobRSSEntry :: RSSEntry,
+    contentFileJobRequest  :: (Request m),
     contentFileJobFilePath :: FilePath
     }
+type ContentFileJob' = ContentFileJob (C.ResourceT IO)
 
 getLatestEntries rssFeed = take (fromMaybe 5 $ maxEntriesToGet $ rssFeedSpec rssFeed) $ rssFeedEntries rssFeed
 
@@ -217,10 +220,12 @@ getContentFileJob (rssEntry, fileName) = do
     request <- parseUrl $ rssEntryURL rssEntry
 
     return ContentFileJob {
+        contentFileJobRSSEntry = rssEntry,
         contentFileJobRequest = request,
         contentFileJobFilePath = fileName
     }
 
+runContentFileJob :: ContentFileJob' -> IO ()
 runContentFileJob contentFileJob = do
     let finalContentFilePath = contentFileJobFilePath contentFileJob
     let tmpContentFilePath = finalContentFilePath ++ "~"
@@ -330,7 +335,14 @@ collectTChan chan = collectTChan' chan [] where
 -- amount can be spawned operating on the same channels
 maxContentFileThreads = 5
 process_content_file_jobs jobChan resultChan = relayTChan jobChan resultChan run where
-    run job = try $ runContentFileJob job :: IO (Either SomeException ())
+    run :: ContentFileJob' -> IO (Either (RSSEntry, SomeException) RSSEntry)
+    run job = do
+        result <- try $ runContentFileJob job
+        return $ package result
+            where
+                entry = contentFileJobRSSEntry job
+                package (Left exception) = Left (entry, exception)
+                package (Right _) = Right entry
 
 get_feeds :: [FeedSpec] -> IO ([Either SomeException RSSFeed], [RSSEntry])
 get_feeds feedSpecs = do
@@ -355,36 +367,13 @@ get_content_files orderedEntries = do
     mapM waitCatch contentThreads
     contentFileResults <- collectTChan resultChan
 
-    let contentFiles = rights contentFileResults
-
-    putStr "\n\n"
-    putStr $ "RSS Content File Errors: " ++ ( groom $ lefts contentFileResults )
-    putStr "\n\n"
-
-    putStr "\n\n"
-    putStr $ "Success Content File Paths:\n" ++ (groom entriesFilenames)
-    putStr "\n\n"
-
-    return contentFiles
+    let successRSSEntries = rights contentFileResults
+    let errorRSSEntries = lefts contentFileResults
+    return (successRSSEntries, errorRSSEntries)
 
 ----
 -- Debug Functions
 ----
-
--- Debug: Display (Entry URL) for each entry
-debug_entry_urls :: [RSSEntry] -> IO ()
-debug_entry_urls entries = do
-    putStr "\n\n"
-    putStr $ "RSS Entries:\n" ++ groom ( P.map rssEntryURL entries )
-    putStr "\n\n"
-
--- Debug: Display (Entry URL, Entry File Path) for each entry
-debug_entry_urls_file_paths :: [RSSEntry] -> IO ()
-debug_entry_urls_file_paths entries = do
-    putStr "\n\n"
-    putStr $ "All Entry URLs/Content File Paths, from entries: \n" ++ (
-        groom $ zip (P.map rssEntryURL entries) (getUniqueFileNames entries))
-    putStr "\n\n"
 
 -- Debug: Displays a representation of the RSS file, for ease of finding useful elements
 debug_inspect_feed_file :: [Either SomeException RSSFeed] -> IO ()
@@ -408,8 +397,39 @@ debug_feed_download_errors rssFeeds feedSpecs = do
     putStr $ "RSS Feed File Errors:\n" ++ ( groom $ zip (P.map feedName failedFeedSpecs) (lefts rssFeeds) )
     putStr "\n\n"
 
+-- Debug: Display the FeedSpecs derived from the yaml file
 debug_yaml_reading :: [FeedSpec] -> IO ()
 debug_yaml_reading feedSpecs = putStrLn $ groom feedSpecs
+
+
+-- Debug: Display (Entry URL) for each entry
+debug_entry_urls :: [RSSEntry] -> IO ()
+debug_entry_urls entries = do
+    putStr "\n\n"
+    putStr $ "RSS Entries:\n" ++ groom ( P.map rssEntryURL entries )
+    putStr "\n\n"
+
+-- Debug: Display (Entry URL, Entry File Path) for each entry
+debug_entry_urls_file_paths :: [RSSEntry] -> IO ()
+debug_entry_urls_file_paths entries = do
+    putStr "\n\n"
+    putStr $ "All Entry URLs/Content File Paths, from entries: \n" ++ (
+        groom $ zip (P.map rssEntryURL entries) (getUniqueFileNames entries))
+    putStr "\n\n"
+
+
+debug_entry_successes_errors :: ([RSSEntry], [(RSSEntry, SomeException)]) -> IO ()
+debug_entry_successes_errors (successRSSEntries, errorRSSEntries) = do
+    putStr "\n\n"
+    putStr $ "RSS Content File Successes:" ++ ( groom $ P.map rssEntryURL successRSSEntries )
+    putStr "\n\n"
+
+    let showErr (entry, error) = (rssEntryURL entry, (take 100 $ show error) ++ "...")
+
+    putStr "\n\n"
+    putStr $ "RSS Content File Errors:\n" ++ (groom $ P.map showErr errorRSSEntries)
+    putStr "\n\n"
+
 
 ----
 -- Main
@@ -421,6 +441,7 @@ main = do
         feedSpecs <- readFeedConfig "feeds.yaml"
         lift $ do
             (rssFeeds, entries) <- get_feeds feedSpecs
+            (successEntries, errorEntries) <- get_content_files entries
 
             -- uncomment as is useful for verbosity
             -- debug_yaml_reading feedSpecs
@@ -428,8 +449,7 @@ main = do
             -- debug_entry_urls entries
             -- debug_entry_urls_file_paths entries
             -- debug_inspect_feed_file rssFeeds
-
-            files <- get_content_files entries
+            -- debug_entry_successes_errors (successEntries, errorEntries)
 
             return ()
     case result of
