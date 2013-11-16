@@ -86,13 +86,6 @@ downXMLPath (tag_name:next_names) = (downXMLPath next_names) . (downXMLPath' tag
 downXMLPath' [] elems = elems
 downXMLPath' tag_name elems = concatMap (findElements' tag_name) $ elems
 
-defaultingChildVal :: String -> String -> Element -> String
-defaultingChildVal name default_val elem = fromMaybe default_val (getVal elem) where
-    getVal elem = do
-    child <- findChild' name elem
-    return $ strContent child
-
-
 ----
 -- Assorted - TODO specify
 ----
