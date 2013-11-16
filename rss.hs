@@ -420,12 +420,14 @@ debug_entry_urls_file_paths entries = do
     putStr "\n\n"
 
 
-debug_entry_successes_errors :: ([RSSEntry], [RSSEntryError]) -> IO ()
-debug_entry_successes_errors (successRSSEntries, errorRSSEntries) = do
+debug_entry_successes :: [RSSEntry] -> IO ()
+debug_entry_successes successRSSEntries = do
     putStr "\n\n"
     putStr $ "RSS Content File Successes:" ++ ( groom $ P.map rssEntryURL successRSSEntries )
     putStr "\n\n"
 
+debug_entry_errors :: [RSSEntryError] -> IO ()
+debug_entry_errors errorRSSEntries = do
     let showErr (entry, error) = (rssEntryURL entry, (take 100 $ show error) ++ "...")
 
     putStr "\n\n"
@@ -451,7 +453,8 @@ main = do
             -- debug_entry_urls entries
             -- debug_entry_urls_file_paths entries
             -- debug_inspect_feed_file rssFeeds
-            -- debug_entry_successes_errors (successEntries, errorEntries)
+            -- debug_entry_successes successEntries
+            debug_entry_errors errorEntries
 
             return ()
     case result of
