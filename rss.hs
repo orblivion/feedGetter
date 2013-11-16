@@ -181,6 +181,7 @@ data RSSEntry = RSSEntry {
     rssEntryFeedSpec :: FeedSpec, rssEntryTitle :: Maybe String,
     rssEntryURL :: URL, rssEntryElement :: Element
 } deriving Show
+type RSSEntryError = (RSSEntry, SomeException)
 data ContentFileJob m = ContentFileJob {
     contentFileJobRSSEntry :: RSSEntry,
     contentFileJobRequest  :: (Request m),
@@ -216,14 +217,16 @@ getRSSFeed rssSpec = do
 -- Content File Getting
 ----
 
+getContentFileJob :: (RSSEntry, String) -> IO (Either RSSEntryError ContentFileJob') 
 getContentFileJob (rssEntry, fileName) = do
-    request <- parseUrl $ rssEntryURL rssEntry
-
-    return ContentFileJob {
-        contentFileJobRSSEntry = rssEntry,
-        contentFileJobRequest = request,
-        contentFileJobFilePath = fileName
-    }
+    eitherRequest <- try $ parseUrl $ rssEntryURL rssEntry
+    case eitherRequest of
+        Left exception -> return $ Left (rssEntry, exception)
+        Right request -> return $ Right $ ContentFileJob {
+            contentFileJobRSSEntry = rssEntry,
+            contentFileJobRequest = request,
+            contentFileJobFilePath = fileName
+        }
 
 runContentFileJob :: ContentFileJob' -> IO ()
 runContentFileJob contentFileJob = do
@@ -335,14 +338,13 @@ collectTChan chan = collectTChan' chan [] where
 -- amount can be spawned operating on the same channels
 maxContentFileThreads = 5
 process_content_file_jobs jobChan resultChan = relayTChan jobChan resultChan run where
-    run :: ContentFileJob' -> IO (Either (RSSEntry, SomeException) RSSEntry)
+    run :: ContentFileJob' -> IO (Either RSSEntryError RSSEntry)
     run job = do
         result <- try $ runContentFileJob job
-        return $ package result
-            where
-                entry = contentFileJobRSSEntry job
-                package (Left exception) = Left (entry, exception)
-                package (Right _) = Right entry
+        let entry = contentFileJobRSSEntry job
+        case result of
+            Left exception -> return $ Left (entry, exception)
+            Right _ -> return $ Right entry
 
 get_feeds :: [FeedSpec] -> IO ([Either SomeException RSSFeed], [RSSEntry])
 get_feeds feedSpecs = do
@@ -361,14 +363,14 @@ get_content_files orderedEntries = do
 
     jobChan <- atomically $ newTChan
     resultChan <- atomically $ newTChan
-    mapM (atomically . (writeTChan jobChan)) contentFileJobs
+    mapM (atomically . (writeTChan jobChan)) $ rights contentFileJobs
 
     contentThreads <- mapM async $ replicate maxContentFileThreads $ process_content_file_jobs jobChan resultChan
     mapM waitCatch contentThreads
     contentFileResults <- collectTChan resultChan
 
     let successRSSEntries = rights contentFileResults
-    let errorRSSEntries = lefts contentFileResults
+    let errorRSSEntries = lefts contentFileResults ++ lefts contentFileJobs
     return (successRSSEntries, errorRSSEntries)
 
 ----
@@ -418,7 +420,7 @@ debug_entry_urls_file_paths entries = do
     putStr "\n\n"
 
 
-debug_entry_successes_errors :: ([RSSEntry], [(RSSEntry, SomeException)]) -> IO ()
+debug_entry_successes_errors :: ([RSSEntry], [RSSEntryError]) -> IO ()
 debug_entry_successes_errors (successRSSEntries, errorRSSEntries) = do
     putStr "\n\n"
     putStr $ "RSS Content File Successes:" ++ ( groom $ P.map rssEntryURL successRSSEntries )
