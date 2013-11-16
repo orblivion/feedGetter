@@ -34,13 +34,22 @@ import Prelude as P
 -- XML Utilities
 ----
 
+-- Certain XML library functions take QNames to refer to tag names, etc, which requires
+-- that you call unqual :: String -> QName on every such parameter. unqualifyfy turns
+-- such functions into functions that accept String
+unqualifyfy :: (QName -> t) -> String -> t
 unqualifyfy f = f' where
     f' a = f (unqual a)
+
+-- String, instead of QName, versions of these XML library functions.
 findElements' = unqualifyfy findElements
 findChild' = unqualifyfy findChild
 findAttr' = unqualifyfy findAttr
 
 data SimpleXMLRepr = SElementRepr String [(String, String)] [SimpleXMLRepr] | STextRepr String | SDontCareRepr
+
+-- Simplify the XML representation, it's more complicated than needed for our purposes
+simpleXML' :: Element -> SimpleXMLRepr
 simpleXML' e = simpleXML $ Elem e
 simpleXML (Elem e) = SElementRepr name attrs content where
     name = (qName . elName) e
@@ -50,7 +59,8 @@ simpleXML (Elem e) = SElementRepr name attrs content where
 simpleXML (Text e) = STextRepr $ cdData e
 simpleXML _ = SDontCareRepr
 
-prettyShow s = show' 0 s where
+prettyShowNodes :: SimpleXMLRepr -> [Char]
+prettyShowNodes s = show' 0 s where
     indent ind = (take ind $ repeat ' ')
     show' ind (SElementRepr name attrs subelems) = indent ind ++ name ++ "\n" ++ attrDisp attrs ++ "\n" ++ subElemDisp where
         attrDisp [] = ""
@@ -60,12 +70,21 @@ prettyShow s = show' 0 s where
     show' ind (STextRepr str) = indent ind ++ "\"" ++ str ++ "\"\n"
     show' _ SDontCareRepr = ""
 
-downXMLPath' [] elems = elems
-downXMLPath' tag_name elems = concatMap (findElements' tag_name) $ elems
 
+-- From a list of high level nodes, we want to find all lower level nodes that are
+-- found by walking down a path of tag names. This function takes a list of tag
+-- names, and a list of higher level nodes, and returns the lower level nodes.
+-- Example: 
+-- downXMLPath ["rss", "channel", "item"] elements
+-- if some of the given elements are <rss> tags, and some of those contain (possibly
+-- multiple) <channel> tags, and some of those contain (possibly multiple) <item> tags,
+-- this function will return all of the <item> tags.
 downXMLPath :: [String] -> [Element] -> [Element]
 downXMLPath [] = id
 downXMLPath (tag_name:next_names) = (downXMLPath next_names) . (downXMLPath' tag_name)
+
+downXMLPath' [] elems = elems
+downXMLPath' tag_name elems = concatMap (findElements' tag_name) $ elems
 
 defaultingChildVal :: String -> String -> Element -> String
 defaultingChildVal name default_val elem = fromMaybe default_val (getVal elem) where
@@ -415,7 +434,7 @@ debug_inspect_feed_file rssFeeds = do
     let allItemNodes = rights rssFeeds >>= getItemNodes . xmlContent >>= return . simpleXML'
     putStr "\n\n"
     putStr $ "Item Nodes: \n"
-    putStr $ P.foldl (++) "" $ P.map prettyShow allItemNodes
+    putStr $ P.foldl (++) "" $ P.map prettyShowNodes allItemNodes
     putStr "\n\n"   
 
     return ()
