@@ -250,12 +250,18 @@ runContentFileJob contentFileJob = do
 
 alphaNumeric = ['a'..'z'] ++ ['A'..'Z'] ++ ['0'..'9']
 
+-- Given a potentially dirty name (probably taken from a URL), replace any
+-- characters that are not alphanumeric, . or - with _. 
+sanitizeForFileName :: String -> String
 sanitizeForFileName "" = "item"
 sanitizeForFileName raw_file_name = P.map sanitizeChar raw_file_name where
     sanitizeChar char
         | not $ elem char (alphaNumeric ++ ".-") = '_'
         | otherwise = char
 
+-- Given a relative path for the feed to go into, create a cleaned up version,
+-- and throw an error for any characters not alphanumeric, _ or /. Somewhat
+-- restrictive
 sanitizeFeedRelPath :: Maybe String -> EitherTIO (Maybe String) 
 sanitizeFeedRelPath Nothing = return Nothing
 sanitizeFeedRelPath (Just str) = validate $ stripRev $ stripRev $ str where
@@ -265,9 +271,11 @@ sanitizeFeedRelPath (Just str) = validate $ stripRev $ stripRev $ str where
     stripRev = strip . reverse
     validate str
         | length str == 0 = yamlError "feedRelPath should have a directory name"
-        | not $ all (flip elem (alphaNumeric ++ "-/")) str = yamlError "feedRelPath can only be alphanumerics and slashes" 
+        | not $ all (flip elem (alphaNumeric ++ "_/")) str = yamlError "feedRelPath can only be alphanumerics and slashes" 
         | otherwise = return $ Just str
 
+-- Given an RSS Entry, return a file name based purely on the URL of the entry
+getContentFileName :: RSSEntry -> String
 getContentFileName rssEntry = (sanitizeForFileName . normalize_extension) raw_file_name where
     -- let this error for now if a valid name can't be created (specifically expecting this for 
     -- extensions)
@@ -281,6 +289,9 @@ getContentFileName rssEntry = (sanitizeForFileName . normalize_extension) raw_fi
                 -- other way in the feed
                 extension = (fromJust . elementToExtension . rssEntryElement) rssEntry
 
+-- Given feeds root path, feed-specific relative file paths, and the file name,
+-- get a full path for an rssEntry
+getContentFilePath :: RSSEntry -> FilePath
 getContentFilePath rssEntry = path where
     path = P.foldl combine "/" [
         rootPath,
@@ -291,6 +302,8 @@ getContentFilePath rssEntry = path where
     addRootDir Nothing = fileDir
     addRootDir (Just extraDir) = combine extraDir fileDir
 
+-- Given a list of file names with potential collisions, return the list with
+-- unique names generated for any path collisions
 getUniqueFileNames' :: [FilePath] -> [FilePath]
 getUniqueFileNames' inNames = P.foldl uniquify [] $ reverse inNames where
     uniquify :: [FilePath] -> FilePath -> [FilePath]
@@ -303,6 +316,7 @@ getUniqueFileNames' inNames = P.foldl uniquify [] $ reverse inNames where
             )
             | otherwise = name
 
+getUniqueFileNames :: [RSSEntry] -> [FilePath]
 getUniqueFileNames = getUniqueFileNames' . (P.map getContentFilePath)
 
 rootPath = "/home/haskell/feeds"
