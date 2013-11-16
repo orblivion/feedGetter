@@ -122,7 +122,12 @@ data ShowableFeedSpec = ShowableFeedSpec {
     } deriving Show
 
 instance Show FeedSpec where
-    show feedSpec = groom $ ShowableFeedSpec (feedName feedSpec) (rssFeedURL feedSpec) (feedRelPath feedSpec) (maxEntriesToGet feedSpec)
+    show feedSpec = groom $ ShowableFeedSpec {
+        feedName' = (feedName feedSpec),
+        rssFeedURL' = (rssFeedURL feedSpec),
+        feedRelPath' = (feedRelPath feedSpec),
+        maxEntriesToGet' = (maxEntriesToGet feedSpec)
+    }
 
 -- Reading Yaml configuration
 
