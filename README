@@ -1,1 +1,5 @@
 An RSS downloader program written in Haskell. It doesn't have a "slick" interface, it just gets your damn files, and puts them where you want them. There are already programs for listening to your audio.
+
+PERMISSIONS:
+
+This software is under an MIT license (see LICENSE file). However I do this only out of the sense that it would be unethical to compel every user of the software to comply with any restrictive license. I prefer that users treat it in the spirit of the GPL, which for now I will only enforce with my appreciation.
