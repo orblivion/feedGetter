@@ -242,7 +242,10 @@ getRSSFeed rssSpec = do
     hFlush stdout
     feedData <- simpleHttp $ rssFeedURL rssSpec
     let content = (parseXML feedData)
-    return $ RSSFeed rssSpec (getRSSEntries content rssSpec) content
+    let rssFeed = RSSFeed rssSpec (getRSSEntries content rssSpec) content
+    case getLatestEntries rssFeed of
+        [] -> error "Empty Feed. Check the file format?"
+        _  -> return rssFeed
 
 ----
 -- Content File Getting
