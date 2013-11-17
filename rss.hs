@@ -160,7 +160,7 @@ readFeedConfig filePath = do
                 url <- errToEitherT . fromJust $ yLookup "url" fileMap
                 let fileInfoGetterName = yLookup "itemNodeToFileInfo" fileMap
                 let maxEntriesToGetStr = yLookup "maxEntriesToGet" fileMap
-                feedRelPath <- sanitizeFeedRelPath $ yLookup "feedRelPath" fileMap
+                feedRelPath <- sanitizeFeedRelPath $ yLookup "path" fileMap
                 maxEntriesToGet <- errToEitherT $ maxEntriesToGetStr >>= Just . read
 
                 return FeedSpec {
