@@ -18,6 +18,7 @@ import Data.List
 import Data.Typeable
 import System.FilePath
 import System.Directory
+import System.IO
 import qualified Data.ByteString.Char8 as BS8
 import qualified Data.ByteString.Lazy as BSLazy
 import Control.Exception
@@ -237,7 +238,8 @@ getRSSEntries top_elements rssSpec = entries where
 -- Given a FeedSpec, download the feed file.
 getRSSFeed :: FeedSpec -> IO RSSFeed
 getRSSFeed rssSpec = do
-    putStr $ "Downloading Feed: " ++ (rssFeedURL rssSpec) ++ "\n"
+    putStrLn $ "Downloading Feed: " ++ (rssFeedURL rssSpec)
+    hFlush stdout
     feedData <- simpleHttp $ rssFeedURL rssSpec
     let content = (parseXML feedData)
     return $ RSSFeed rssSpec (getRSSEntries content rssSpec) content
@@ -268,13 +270,15 @@ runContentFileJob contentFileJob = do
     alreadyHave <- doesFileExist finalContentFilePath
     case alreadyHave of
         False -> do
-            putStr $ "Downloading: " ++ finalContentFilePath ++ "\n"
+            putStrLn $ "Downloading: " ++ finalContentFilePath
+            hFlush stdout
             createDirectoryIfMissing True $ takeDirectory finalContentFilePath
             download (contentFileJobRequest contentFileJob) tmpContentFilePath
             renameFile tmpContentFilePath finalContentFilePath
             return ()
         True -> do
-            putStr $ "Already Have: " ++ finalContentFilePath ++ "\n"
+            putStrLn $ "Already Have: " ++ finalContentFilePath
+            hFlush stdout
         where
             download request path = do
                 withManager $ \manager -> do
@@ -456,58 +460,65 @@ get_content_files orderedEntries = do
 debug_inspect_feed_file :: [RSSFeed] -> IO ()
 debug_inspect_feed_file rssFeeds = do
     let allItemNodes = rssFeeds >>= getItemNodes . xmlContent >>= return . simpleXML'
-    putStr "\n\n"
-    putStr $ "Item Nodes: \n"
-    putStr $ P.foldl (++) "" $ P.map prettyShowNodes allItemNodes
-    putStr "\n\n"   
+    putStrLn "\n"
+    putStrLn $ "Item Nodes: "
+    putStrLn $ P.foldl (++) "" $ P.map prettyShowNodes allItemNodes
+    putStrLn ""
+    hFlush stdout
 
     return ()
 
 -- Debug: Display the FeedSpecs derived from the yaml file
 debug_yaml_reading :: [FeedSpec] -> IO ()
-debug_yaml_reading feedSpecs = putStrLn $ groom feedSpecs
+debug_yaml_reading feedSpecs = do
+    putStrLn $ groom feedSpecs
+    hFlush stdout
 
 
 -- Debug: Display (Entry URL) for each entry
 debug_entry_urls :: [RSSEntry] -> IO ()
 debug_entry_urls entries = do
-    putStr "\n\n"
-    putStr $ "RSS Entries:\n" ++ groom ( P.map rssEntryURL entries )
-    putStr "\n\n"
+    putStrLn "\n"
+    putStrLn $ "RSS Entries:\n" ++ groom ( P.map rssEntryURL entries )
+    putStrLn ""
+    hFlush stdout
 
 -- Debug: Display (Entry URL, Entry File Path) for each entry
 debug_entry_urls_file_paths :: [RSSEntry] -> IO ()
 debug_entry_urls_file_paths entries = do
-    putStr "\n\n"
-    putStr $ "All Entry URLs/Content File Paths, from entries: \n" ++ (
+    putStrLn "\n"
+    putStrLn $ "All Entry URLs/Content File Paths, from entries: \n" ++ (
         groom $ zip (P.map rssEntryURL entries) (getUniqueFileNames entries))
-    putStr "\n\n"
+    putStrLn ""
+    hFlush stdout
 
 
 debug_entry_successes :: [RSSEntry] -> IO ()
 debug_entry_successes successRSSEntries = do
-    putStr "\n\n"
-    putStr $ "RSS Content File Successes (Including skips from already having them):" ++ ( groom $ P.map rssEntryURL successRSSEntries )
-    putStr "\n\n"
+    putStrLn "\n"
+    putStrLn $ "RSS Content File Successes (Including skips from already having them):" ++ ( groom $ P.map rssEntryURL successRSSEntries )
+    putStrLn ""
+    hFlush stdout
 
 -- Debug: Show errors in downloading rss files.
 debug_feed_file_errors :: [FeedSpecError] -> IO ()
 debug_feed_file_errors errorFeedSpecs = do
     let showErr (feedSpec, error) = (feedName feedSpec, (take 100 $ show error) ++ "...")
 
-    putStr "\n\n"
-    putStr $ "RSS Feed File Errors:\n" ++ (groom $ P.map showErr errorFeedSpecs)
-    putStr "\n\n"
+    putStrLn "\n"
+    putStrLn $ "RSS Feed File Errors:\n" ++ (groom $ P.map showErr errorFeedSpecs)
+    putStrLn ""
+    hFlush stdout
 
 
 debug_entry_errors :: [RSSEntryError] -> IO ()
 debug_entry_errors errorRSSEntries = do
     let showErr (entry, error) = (rssEntryURL entry, (take 100 $ show error) ++ "...")
 
-    putStr "\n\n"
-    putStr $ "RSS Content File Errors:\n" ++ (groom $ P.map showErr errorRSSEntries)
-    putStr "\n\n"
-
+    putStrLn "\n"
+    putStrLn $ "RSS Content File Errors:\n" ++ (groom $ P.map showErr errorRSSEntries)
+    putStrLn ""
+    hFlush stdout
 
 ----
 -- Main
@@ -535,7 +546,9 @@ main = do
 
             return ()
     case result of
-        Left a -> putStrLn $ groom a
+        Left a -> do
+            putStrLn $ groom a
+            hFlush stdout
         _ -> return ()
 
     return ()
