@@ -10,6 +10,7 @@ import Text.XML.Light.Input
 import Text.XML.Light.Proc
 import Data.Yaml.YamlLight
 import Text.Groom
+import Text.Printf (printf)
 import Data.Either
 import Data.Maybe
 import Data.Map as DM
@@ -20,7 +21,6 @@ import System.FilePath
 import System.Directory
 import System.IO
 import qualified Data.ByteString.Char8 as BS8
-import qualified Data.ByteString.Lazy as BSLazy
 import Control.Exception
 import Control.Monad
 import Control.Monad.Trans
@@ -28,6 +28,7 @@ import Control.Monad.Trans.Either
 import Control.Monad.STM
 import Control.Concurrent.STM.TChan
 import System.Random.Shuffle
+import Crypto.Hash.SHA1 as SHA1
 import Prelude as P
  
 ----
@@ -342,22 +343,24 @@ getContentFilePath rssEntry = path where
     addRootDir Nothing = fileDir
     addRootDir (Just extraDir) = combine extraDir fileDir
 
+-- Credit http://stackoverflow.com/a/9503170
+toHex :: BS8.ByteString -> String
+toHex bytes = BS8.unpack bytes >>= printf "%02x"
+
 -- Given a list of file names with potential collisions, return the list with
 -- unique names generated for any path collisions
-getUniqueFileNames' :: [FilePath] -> [FilePath]
-getUniqueFileNames' inNames = P.foldl uniquify [] $ reverse inNames where
-    uniquify :: [FilePath] -> FilePath -> [FilePath]
-    uniquify names_so_far name = uniqueName:names_so_far where
+getUniqueFileNames :: [RSSEntry] -> [FilePath]
+getUniqueFileNames entries = P.foldl uniquify [] $ reverse entries where
+    uniquify :: [FilePath] -> RSSEntry -> [FilePath]
+    uniquify names_so_far entry = uniqueName:names_so_far where
+        name = getContentFilePath entry
         uniqueName
             | elem name names_so_far = (
                 replaceBaseName name 
                 $ (takeBaseName name) 
-                    ++ (show $ length names_so_far)
+                    ++ (toHex $ SHA1.hash $ BS8.pack $ rssEntryURL entry)
             )
             | otherwise = name
-
-getUniqueFileNames :: [RSSEntry] -> [FilePath]
-getUniqueFileNames = getUniqueFileNames' . (P.map getContentFilePath)
 
 rootPath = "/home/haskell/feeds"
 
