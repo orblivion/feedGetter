@@ -141,13 +141,25 @@ yamlError str = hoistEither $ Left $ SomeException $ YamlException str
 
 readFeedConfig :: FilePath -> EitherTIO [FeedSpec]
 readFeedConfig filePath = do
-    allSpecsYaml <- (EitherT . try) $ parseYamlFile filePath
+    fileYaml <- (EitherT . try) $ parseYamlFile filePath
+    let top_level_error = yamlError "yaml file must have 'feeds' and 'config' at top level"
+    fileMap <- case fileYaml of 
+        (YMap fileMap') -> return fileMap'
+        _ -> top_level_error
+    globalParamsYaml <- case DM.lookup (yPack "config") fileMap of 
+        (Just globalParamsYaml') -> return globalParamsYaml'
+        _ -> top_level_error
+    allSpecsYaml <- case DM.lookup (yPack "feeds") fileMap of 
+        (Just allSpecsYaml') -> return allSpecsYaml'
+        _ -> top_level_error
     entries <- yamlToEntries allSpecsYaml
     mapM entryToFeedSpec entries
         where 
+            yPack :: [Char] -> YamlLight
+            yPack = YStr . BS8.pack
             yLookup :: [Char] -> (Map YamlLight YamlLight) -> Maybe [Char]
             yLookup key map = do
-                yaml <- DM.lookup (YStr $ BS8.pack key) map
+                yaml <- DM.lookup (yPack key) map
                 case yaml of
                     YStr str -> return $ BS8.unpack str
                     _ -> Nothing
@@ -156,12 +168,12 @@ readFeedConfig filePath = do
             yamlToEntries (YMap entryMap) = return $ toList entryMap where
             yamlToEntries _ = yamlError "Badly formatted feed specification file."
             entryToFeedSpec :: (YamlLight, YamlLight) -> EitherTIO FeedSpec
-            entryToFeedSpec ((YStr feedName), (YMap fileMap)) = do
+            entryToFeedSpec ((YStr feedName), (YMap entriesMap)) = do
                 -- either, not eithert. hmm.
-                url <- errToEitherT . fromJust $ yLookup "url" fileMap
-                let fileInfoGetterName = yLookup "itemNodeToFileInfo" fileMap
-                let maxEntriesToGetStr = yLookup "maxEntriesToGet" fileMap
-                feedRelPath <- sanitizeFeedRelPath $ yLookup "path" fileMap
+                url <- errToEitherT . fromJust $ yLookup "url" entriesMap
+                let fileInfoGetterName = yLookup "itemNodeToFileInfo" entriesMap
+                let maxEntriesToGetStr = yLookup "maxEntriesToGet" entriesMap
+                feedRelPath <- sanitizeFeedRelPath $ yLookup "path" entriesMap
                 maxEntriesToGet <- errToEitherT $ maxEntriesToGetStr >>= Just . read
 
                 return FeedSpec {
