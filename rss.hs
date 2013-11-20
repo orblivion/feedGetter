@@ -541,8 +541,8 @@ main = do
             -- uncomment as is useful for verbosity
             case True of
                 True -> do -- enabled debug
-                    debug_entry_errors errorEntries
                     debug_feed_file_errors errorFeedSpecs
+                    debug_entry_errors errorEntries
                 False -> do -- disabled debug, but still subject to type checking
                     debug_yaml_reading feedSpecs
                     debug_entry_urls entries
