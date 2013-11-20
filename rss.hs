@@ -136,10 +136,12 @@ instance Show FeedSpec where
 data YamlException = YamlException String
     deriving (Show, Typeable)
 
+data GlobalParams = GlobalParams {rootPath :: String} deriving Show
+
 instance Exception YamlException
 yamlError str = hoistEither $ Left $ SomeException $ YamlException str
 
-readFeedConfig :: FilePath -> EitherTIO [FeedSpec]
+readFeedConfig :: FilePath -> EitherTIO ([FeedSpec], GlobalParams)
 readFeedConfig filePath = do
     fileYaml <- (EitherT . try) $ parseYamlFile filePath
     let top_level_error = yamlError "yaml file must have 'feeds' and 'config' at top level"
@@ -152,8 +154,10 @@ readFeedConfig filePath = do
     allSpecsYaml <- case DM.lookup (yPack "feeds") fileMap of 
         (Just allSpecsYaml') -> return allSpecsYaml'
         _ -> top_level_error
-    entries <- yamlToEntries allSpecsYaml
-    mapM entryToFeedSpec entries
+    specEntries <- yamlToSpecEntries allSpecsYaml
+    feedSpecs <- mapM specEntryToFeedSpec specEntries
+    globalParams <- yamlToGlobalParams globalParamsYaml
+    return (feedSpecs, globalParams)
         where 
             yPack :: [Char] -> YamlLight
             yPack = YStr . BS8.pack
@@ -164,16 +168,24 @@ readFeedConfig filePath = do
                     YStr str -> return $ BS8.unpack str
                     _ -> Nothing
                 
-            yamlToEntries :: YamlLight -> EitherTIO [(YamlLight, YamlLight)]
-            yamlToEntries (YMap entryMap) = return $ toList entryMap where
-            yamlToEntries _ = yamlError "Badly formatted feed specification file."
-            entryToFeedSpec :: (YamlLight, YamlLight) -> EitherTIO FeedSpec
-            entryToFeedSpec ((YStr feedName), (YMap entriesMap)) = do
+            yamlToSpecEntries :: YamlLight -> EitherTIO [(YamlLight, YamlLight)]
+            yamlToSpecEntries (YMap entryMap) = return $ toList entryMap where
+            yamlToSpecEntries _ = yamlError "Badly formatted feed specifications."
+
+            yamlToGlobalParams :: YamlLight -> EitherTIO GlobalParams
+            yamlToGlobalParams globalParamsYaml = get $ lookupYL (yPack "root_path") globalParamsYaml >>= unStr >>= return . BS8.unpack where
+                get Nothing = yamlError "Badly formatted feed specifications."
+                get (Just dirtyRootPath) = do
+                    rootPath <- sanitizeRootPath dirtyRootPath
+                    return $ GlobalParams rootPath
+
+            specEntryToFeedSpec :: (YamlLight, YamlLight) -> EitherTIO FeedSpec
+            specEntryToFeedSpec ((YStr feedName), (YMap entriesMap)) = do
                 -- either, not eithert. hmm.
                 url <- errToEitherT . fromJust $ yLookup "url" entriesMap
                 let fileInfoGetterName = yLookup "itemNodeToFileInfo" entriesMap
                 let maxEntriesToGetStr = yLookup "maxEntriesToGet" entriesMap
-                feedRelPath <- sanitizeFeedRelPath $ yLookup "path" entriesMap
+                feedRelPath <- sanitizePath $ yLookup "path" entriesMap
                 maxEntriesToGet <- errToEitherT $ maxEntriesToGetStr >>= Just . read
 
                 return FeedSpec {
@@ -183,7 +195,7 @@ readFeedConfig filePath = do
                   itemNodeToFileInfo = fileInfoGetterName >>= getFileInfoGetter,
                   maxEntriesToGet = maxEntriesToGet 
                 }
-            entryToFeedSpec _ = yamlError $ "Badly formatted yaml entry. Are you missing a field?"
+            specEntryToFeedSpec _ = yamlError $ "Badly formatted yaml entry. Are you missing a field?"
 
 ----
 -- RSS
@@ -315,17 +327,24 @@ sanitizeForFileName raw_file_name = P.map sanitizeChar raw_file_name where
 -- Given a relative path for the feed to go into, create a cleaned up version,
 -- and throw an error for any characters not alphanumeric, _ or /. Somewhat
 -- restrictive
-sanitizeFeedRelPath :: Maybe String -> EitherTIO (Maybe String) 
-sanitizeFeedRelPath Nothing = return Nothing
-sanitizeFeedRelPath (Just str) = validate $ stripRev $ stripRev $ str where
-    strip ('/':str) = strip str
-    strip str = str
+sanitizePath :: Maybe String -> EitherTIO (Maybe String) 
+sanitizePath Nothing = return Nothing
+sanitizePath (Just dirtyPath) = validate $ stripRev $ stripRev $ dirtyPath where
+    strip ('/':dirtyPath') = strip dirtyPath'
+    strip dirtyPath' = dirtyPath'
     stripRev :: String -> String
     stripRev = strip . reverse
-    validate str
-        | length str == 0 = yamlError "feedRelPath should have a directory name"
-        | not $ all (flip elem (alphaNumeric ++ "_/")) str = yamlError "feedRelPath can only be alphanumerics and slashes" 
-        | otherwise = return $ Just str
+    validate dirtyPath'
+        | length dirtyPath' == 0 = yamlError "path should have a directory name"
+        | not $ all (flip elem (alphaNumeric ++ "_/")) dirtyPath' = yamlError $ dirtyPath' ++ ": path can only be alphanumerics and slashes" 
+        | otherwise = return $ Just dirtyPath'
+
+sanitizeRootPath :: String -> EitherTIO String
+sanitizeRootPath dirtyPath = do
+    strippedPath <- sanitizePath $ Just dirtyPath
+    case dirtyPath of -- if the original started with '/', put it back after sanitizing
+        ('/':_) -> return $ '/':(fromJust strippedPath)
+        _ -> return $ fromJust strippedPath
 
 -- Given an RSS Entry, return a file name based purely on the URL of the entry
 getContentFileName :: RSSEntry -> String
@@ -344,10 +363,10 @@ getContentFileName rssEntry = (sanitizeForFileName . normalize_extension) raw_fi
 
 -- Given feeds root path, feed-specific relative file paths, and the file name,
 -- get a full path for an rssEntry
-getContentFilePath :: RSSEntry -> FilePath
-getContentFilePath rssEntry = path where
+getContentFilePath :: RSSEntry -> GlobalParams -> FilePath
+getContentFilePath rssEntry globalParams = path where
     path = P.foldl combine "/" [
-        rootPath,
+        rootPath globalParams,
         addRootDir contentFileExtraDir,
         getContentFileName rssEntry]
     fileDir = (sanitizeForFileName . feedName . rssEntryFeedSpec) rssEntry
@@ -361,11 +380,11 @@ toHex bytes = BS8.unpack bytes >>= printf "%02x"
 
 -- Given a list of file names with potential collisions, return the list with
 -- unique names generated for any path collisions
-getUniqueFileNames :: [RSSEntry] -> [FilePath]
-getUniqueFileNames entries = P.foldl uniquify [] $ reverse entries where
+getUniqueFileNames :: [RSSEntry] -> GlobalParams -> [FilePath]
+getUniqueFileNames entries globalParams = P.foldl uniquify [] $ reverse entries where
     uniquify :: [FilePath] -> RSSEntry -> [FilePath]
     uniquify names_so_far entry = uniqueName:names_so_far where
-        name = getContentFilePath entry
+        name = getContentFilePath entry globalParams
         uniqueName
             | elem name names_so_far = (
                 replaceBaseName name 
@@ -373,8 +392,6 @@ getUniqueFileNames entries = P.foldl uniquify [] $ reverse entries where
                     ++ (toHex $ SHA1.hash $ BS8.pack $ rssEntryURL entry)
             )
             | otherwise = name
-
-rootPath = "/home/haskell/feeds"
 
 ----
 -- Processes
@@ -451,10 +468,10 @@ get_feeds feedSpecs = do
     return (successRSSFeeds, errorFeedSpecs, entries)
 
 -- Get the Content Files (mp3, ogg)
-get_content_files :: [RSSEntry] -> IO ([RSSEntry], [RSSEntryError])
-get_content_files orderedEntries = do 
+get_content_files :: [RSSEntry] -> GlobalParams -> IO ([RSSEntry], [RSSEntryError])
+get_content_files orderedEntries globalParams = do 
     entries <- shuffleM orderedEntries
-    let entriesFilenames = getUniqueFileNames entries
+    let entriesFilenames = getUniqueFileNames entries globalParams
 
     contentFileJobs <- mapM getContentFileJob $ zip entries entriesFilenames
 
@@ -502,11 +519,11 @@ debug_entry_urls entries = do
     hFlush stdout
 
 -- Debug: Display (Entry URL, Entry File Path) for each entry
-debug_entry_urls_file_paths :: [RSSEntry] -> IO ()
-debug_entry_urls_file_paths entries = do
+debug_entry_urls_file_paths :: [RSSEntry] -> GlobalParams -> IO ()
+debug_entry_urls_file_paths entries globalParams = do
     putStrLn "\n"
     putStrLn $ "All Entry URLs/Content File Paths, from entries: \n" ++ (
-        groom $ zip (P.map rssEntryURL entries) (getUniqueFileNames entries))
+        groom $ zip (P.map rssEntryURL entries) (getUniqueFileNames entries globalParams))
     putStrLn ""
     hFlush stdout
 
@@ -545,12 +562,11 @@ debug_entry_errors errorRSSEntries = do
 main :: IO ()
 main = do
     result <- runEitherT $ do
-        feedSpecs <- readFeedConfig "feeds.yaml"
+        (feedSpecs, globalParams) <- readFeedConfig "feeds.yaml"
         lift $ do
             (successRSSFeeds, errorFeedSpecs, entries) <- get_feeds feedSpecs
-            (successEntries, errorEntries) <- get_content_files entries
-
-            -- uncomment as is useful for verbosity
+            (successEntries, errorEntries) <- get_content_files entries globalParams
+            -- move ot True case as is useful for verbosity
             case True of
                 True -> do -- enabled debug
                     debug_feed_file_errors errorFeedSpecs
@@ -558,7 +574,7 @@ main = do
                 False -> do -- disabled debug, but still subject to type checking
                     debug_yaml_reading feedSpecs
                     debug_entry_urls entries
-                    debug_entry_urls_file_paths entries
+                    debug_entry_urls_file_paths entries globalParams
                     debug_inspect_feed_file successRSSFeeds
                     debug_entry_successes successEntries
 
