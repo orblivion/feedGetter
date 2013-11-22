@@ -319,7 +319,7 @@ alphaNumeric = ['a'..'z'] ++ ['A'..'Z'] ++ ['0'..'9']
 -- characters that are not alphanumeric, . or - with _. 
 sanitizeForFileName :: String -> String
 sanitizeForFileName "" = "item"
-sanitizeForFileName raw_file_name = P.map sanitizeChar raw_file_name where
+sanitizeForFileName raw_file_name = take 150 $ P.map sanitizeChar raw_file_name where
     sanitizeChar char
         | not $ elem char (alphaNumeric ++ ".-") = '_'
         | otherwise = char
@@ -389,7 +389,7 @@ getUniqueFileNames entries globalParams = P.foldl uniquify [] $ reverse entries 
             | elem name names_so_far = (
                 replaceBaseName name 
                 $ (takeBaseName name) 
-                    ++ (toHex $ SHA1.hash $ BS8.pack $ rssEntryURL entry)
+                    ++ '.':(toHex $ SHA1.hash $ BS8.pack $ rssEntryURL entry)
             )
             | otherwise = name
 
