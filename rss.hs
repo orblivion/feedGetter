@@ -319,9 +319,9 @@ alphaNumeric = ['a'..'z'] ++ ['A'..'Z'] ++ ['0'..'9']
 -- characters that are not alphanumeric, . or - with _. 
 sanitizeForFileName :: String -> String
 sanitizeForFileName "" = "item"
-sanitizeForFileName raw_file_name = take 150 $ P.map sanitizeChar raw_file_name where
+sanitizeForFileName raw_file_name = P.map sanitizeChar raw_file_name where
     sanitizeChar char
-        | not $ elem char (alphaNumeric ++ ".-") = '_'
+        | not $ elem char (alphaNumeric ++ "-") = '_'
         | otherwise = char
 
 -- Given a relative path for the feed to go into, create a cleaned up version,
@@ -348,7 +348,10 @@ sanitizeRootPath dirtyPath = do
 
 -- Given an RSS Entry, return a file name based purely on the URL of the entry
 getContentFileName :: RSSEntry -> String
-getContentFileName rssEntry = (sanitizeForFileName . normalize_extension) raw_file_name where
+getContentFileName rssEntry = normalize_extension $ cleanBase $ cleanExt raw_file_name where
+    cleanBase = replaceBaseName $ take 140 $ sanitizeForFileName $ takeBaseName raw_file_name
+    cleanExt = replaceExtension $ take 10 $ sanitizeForFileName $ takeExtension raw_file_name
+
     -- let this error for now if a valid name can't be created (specifically expecting this for 
     -- extensions)
     raw_file_name = (last . (splitOn "/") . uriPath . fromJust . parseURI . rssEntryURL) rssEntry
