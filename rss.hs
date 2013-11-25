@@ -385,11 +385,12 @@ toHex bytes = BS8.unpack bytes >>= printf "%02x"
 -- unique names generated for any path collisions
 getUniqueFileNames :: [RSSEntry] -> GlobalParams -> [FilePath]
 getUniqueFileNames entries globalParams = P.foldl uniquify [] $ reverse entries where
+    all_names = P.map (flip getContentFilePath globalParams) entries
     uniquify :: [FilePath] -> RSSEntry -> [FilePath]
     uniquify names_so_far entry = uniqueName:names_so_far where
         name = getContentFilePath entry globalParams
         uniqueName
-            | elem name names_so_far = (
+            | elem name all_names = (
                 replaceBaseName name 
                 $ (takeBaseName name) 
                     ++ '.':(toHex $ SHA1.hash $ BS8.pack $ rssEntryURL entry)
