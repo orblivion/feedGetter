@@ -186,7 +186,7 @@ readFeedConfig filePath = do
                 let fileInfoGetterName = yLookup "itemNodeToFileInfo" entriesMap
                 let maxEntriesToGetStr = yLookup "maxEntriesToGet" entriesMap
                 feedRelPath <- sanitizePath $ yLookup "path" entriesMap
-                maxEntriesToGet <- errToEitherT $ maxEntriesToGetStr >>= Just . read
+                let maxEntriesToGet = maxEntriesToGetStr >>= fmap fst . listToMaybe . reads
 
                 return FeedSpec {
                   feedName = BS8.unpack feedName,
