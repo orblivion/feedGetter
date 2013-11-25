@@ -349,8 +349,8 @@ sanitizeRootPath dirtyPath = do
 -- Given an RSS Entry, return a file name based purely on the URL of the entry
 getContentFileName :: RSSEntry -> String
 getContentFileName rssEntry = normalize_extension $ cleanBase $ cleanExt raw_file_name where
-    cleanBase = replaceBaseName $ take 140 $ sanitizeForFileName $ takeBaseName raw_file_name
-    cleanExt = replaceExtension $ take 10 $ sanitizeForFileName $ takeExtension raw_file_name
+    cleanBase raw_file_name = replaceBaseName  raw_file_name $ take 140 $ sanitizeForFileName $ takeBaseName raw_file_name
+    cleanExt raw_file_name  = replaceExtension raw_file_name $ take 10  $ sanitizeForFileName $ (tail . takeExtension) raw_file_name
 
     -- let this error for now if a valid name can't be created (specifically expecting this for 
     -- extensions)
