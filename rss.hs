@@ -390,7 +390,7 @@ getUniqueFileNames entries globalParams = P.foldl uniquify [] $ reverse entries 
     uniquify names_so_far entry = uniqueName:names_so_far where
         name = getContentFilePath entry globalParams
         uniqueName
-            | elem name all_names = (
+            | (length $ P.filter (== name) all_names) > 1 = (
                 replaceBaseName name 
                 $ (takeBaseName name) 
                     ++ '.':(toHex $ SHA1.hash $ BS8.pack $ rssEntryURL entry)
