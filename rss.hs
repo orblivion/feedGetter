@@ -298,7 +298,7 @@ runContentFileJob contentFileJob = do
     alreadyHave <- doesFileExist finalContentFilePath
     case alreadyHave of
         False -> do
-            putStrLn $ "Downloading: " ++ finalContentFilePath
+            putStrLn $ "Downloading Content: " ++ finalContentFilePath
             hFlush stdout
             createDirectoryIfMissing True $ takeDirectory finalContentFilePath
             download (contentFileJobRequest contentFileJob) tmpContentFilePath
