@@ -273,7 +273,7 @@ getRSSFeed rssSpec = do
         _  -> return rssFeed
 
 ----
--- Content File Getting
+-- Content File Getting/Pruning
 ----
 
 -- Given an RSSEntry, and a file name, create a ContentFileJob structure
@@ -303,6 +303,7 @@ runContentFileJob contentFileJob = do
             createDirectoryIfMissing True $ takeDirectory finalContentFilePath
             download (contentFileJobRequest contentFileJob) tmpContentFilePath
             renameFile tmpContentFilePath finalContentFilePath
+            addFileToIndex finalContentFilePath
             return ()
         True -> do
             putStrLn $ "Already Have: " ++ finalContentFilePath
@@ -364,13 +365,18 @@ getContentFileName rssEntry = normalize_extension $ cleanBase $ cleanExt raw_fil
                 -- other way in the feed
                 extension = (fromJust . elementToExtension . rssEntryElement) rssEntry
 
+-- Given a feedSpec, get the full directory paths of its content files
+getContentFileDir :: FeedSpec -> String
+getContentFileDir spec = undefined
+    -- rootPath globalParams,
+    -- addRootDir contentFileExtraDir,
+
 -- Given feeds root path, feed-specific relative file paths, and the file name,
 -- get a full path for an rssEntry
 getContentFilePath :: RSSEntry -> GlobalParams -> FilePath
 getContentFilePath rssEntry globalParams = path where
     path = P.foldl combine "/" [
-        rootPath globalParams,
-        addRootDir contentFileExtraDir,
+        getContentFileDir $ rssEntryFeedSpec rssEntry
         getContentFileName rssEntry]
     fileDir = (sanitizeForFileName . feedName . rssEntryFeedSpec) rssEntry
     contentFileExtraDir = (feedRelPath . rssEntryFeedSpec) rssEntry
@@ -396,6 +402,15 @@ getUniqueFileNames entries globalParams = P.foldl uniquify [] $ reverse entries 
                     ++ '.':(toHex $ SHA1.hash $ BS8.pack $ rssEntryURL entry)
             )
             | otherwise = name
+
+addFileToIndex :: String -> IO ()
+addFileToIndex finalContentFilePath = undefined
+
+removeFileFromIndex :: String -> IO ()
+removeFileFromIndex finalContentFilePath = undefined
+
+getFileIndex :: String -> IO [String]
+getFileIndex finalContentFilePath = undefined
 
 ----
 -- Processes
@@ -491,6 +506,15 @@ get_content_files orderedEntries globalParams = do
     let errorRSSEntries = lefts contentFileResults ++ lefts contentFileJobs
     return (successRSSEntries, errorRSSEntries)
 
+delete_old_files :: [RSSEntry] -> [FeedSpec] -> GlobalParams -> IO ()
+delete_old_files entries feedSpecs globalParams = do
+    let existingFiles = getUniqueFileNames entries globalParams
+    let contentDirs = P.map getContentFileDir feedSpecs
+    filesInIndex' <- mapM getFileIndex contentDirs
+    let filesInIndex = concat filesInIndex'
+    let filestoRemove = filesInIndex - existingFiles
+    mapM_ System.Directory.removeFile filestoRemove
+
 ----
 -- Debug Functions
 ----
@@ -570,6 +594,7 @@ main = do
         lift $ do
             (successRSSFeeds, errorFeedSpecs, entries) <- get_feeds feedSpecs
             (successEntries, errorEntries) <- get_content_files entries globalParams
+            delete_old_files entries feedSpecs globalParams
             -- move ot True case as is useful for verbosity
             case True of
                 True -> do -- enabled debug
