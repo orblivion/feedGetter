@@ -228,12 +228,11 @@ data RSSEntry = RSSEntry {
 } deriving Show
 type FeedSpecError = (FeedSpec, SomeException)
 type RSSEntryError = (RSSEntry, SomeException)
-data ContentFileJob' m = ContentFileJob' {
+data ContentFileJob = ContentFileJob' {
     contentFileJobRSSEntry :: RSSEntry,
-    contentFileJobRequest  :: (Request m),
+    contentFileJobRequest  :: Request,
     contentFileJobFilePath :: FilePath
     }
-type ContentFileJob = ContentFileJob' (C.ResourceT IO)
 
 -- Given an RSS Feed, grab the latest entries
 getLatestEntries :: RSSFeed -> [RSSEntry]
