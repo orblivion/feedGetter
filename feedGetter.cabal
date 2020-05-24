@@ -2,7 +2,7 @@
 -- documentation, see http://haskell.org/cabal/users-guide/
 
 name:                feedGetter
-version:             0.1.0.0
+version:             0.2.0.0
 synopsis:            An RSS downloader
 -- description:         
 homepage:            https://github.com/orblivion/feedGetter
@@ -21,25 +21,25 @@ executable feedGetter
   -- other-modules:       
   -- other-extensions:    
   build-depends:
-    base >=4.6 && <4.7,
-    cryptohash,
-    random-shuffle,
-    stm,
-    either,
-    transformers,
-    monads-tf,
-    bytestring,
-    directory,
-    filepath,
-    split,
-    containers,
-    groom,
-    yaml-light,
-    async,
-    network,
-    conduit,
-    conduit-extra,
-    http-conduit,
-    xml
+    base >=4.11 && <4.12,
+    cryptohash >=0.11 && <0.12,
+    random-shuffle >=0.0 && <0.1,
+    stm >=2.5 && <2.6,
+    transformers >=0.5 && <0.6,
+    transformers-either >=0.1 && <0.2,
+    monads-tf >=0.1 && <0.2,
+    bytestring >=0.10 && <0.11,
+    directory >=1.3 && <1.4,
+    filepath >=1.4 && <1.5,
+    split >=0.2 && <0.3,
+    containers >=0.6 && <0.7,
+    groom >=0.1 && <0.2,
+    yaml-light >=0.1 && <0.2,
+    async >=2.2 && <2.3,
+    network-uri >=2.6 && <2.7,
+    conduit >=1.3 && <1.4,
+    conduit-extra >=1.3 && <1.4,
+    http-conduit >=2.3 && <2.4,
+    xml >=1.3 && <1.4
   -- hs-source-dirs:      
   default-language:    Haskell2010
