@@ -1,7 +1,10 @@
 {-# LANGUAGE DeriveDataTypeable #-}
 
+import Data.Conduit (runConduitRes, (.|))
 import Data.Conduit.Binary (sinkFile)
-import Network.HTTP.Conduit (http, withManager, parseUrl, simpleHttp, Request, responseBody)
+import Network.HTTP.Conduit (simpleHttp)
+import Network.HTTP.Client.Conduit (parseUrlThrow)
+import Network.HTTP.Simple (httpSource, Request, getResponseBody)
 import qualified Data.Conduit as C
 import Network.URI
 import Control.Concurrent.Async
@@ -76,7 +79,7 @@ simpleXML _ = SDontCareRepr
 
 prettyShowNodes :: SimpleXMLRepr -> [Char]
 prettyShowNodes s = show' 0 s where
-    indent ind = (take ind $ repeat ' ')
+    indent ind = (P.take ind $ repeat ' ')
     show' ind (SElementRepr name attrs subelems) = indent ind ++ name ++ "\n" ++ attrDisp attrs ++ "\n" ++ subElemDisp where
         attrDisp [] = ""
         attrDisp attrs = concatMap showAttr attrs
@@ -236,7 +239,7 @@ data ContentFileJob = ContentFileJob' {
 
 -- Given an RSS Feed, grab the latest entries
 getLatestEntries :: RSSFeed -> [RSSEntry]
-getLatestEntries rssFeed = take (fromMaybe 5 $ maxEntriesToGet $ rssFeedSpec rssFeed) $ rssFeedEntries rssFeed
+getLatestEntries rssFeed = P.take (fromMaybe 5 $ maxEntriesToGet $ rssFeedSpec rssFeed) $ rssFeedEntries rssFeed
 
 -- Starting from the top level elements (representations of XML data), return a
 -- list of the lower level elements within, which each represent a single rss
@@ -278,7 +281,7 @@ getRSSFeed rssSpec = do
 -- Given an RSSEntry, and a file name, create a ContentFileJob structure
 getContentFileJob :: (RSSEntry, String) -> IO (Either RSSEntryError ContentFileJob) 
 getContentFileJob (rssEntry, fileName) = do
-    eitherRequest <- try $ parseUrl $ rssEntryURL rssEntry
+    eitherRequest <- try $ parseUrlThrow $ rssEntryURL rssEntry
     case eitherRequest of
         Left exception -> return $ Left (rssEntry, exception)
         Right request -> return $ Right $ ContentFileJob' {
@@ -307,10 +310,8 @@ runContentFileJob contentFileJob = do
             putStrLn $ "Already Have: " ++ finalContentFilePath
             hFlush stdout
         where
-            download request path = do
-                withManager $ \manager -> do
-                    response <- http request manager
-                    responseBody response C.$$+- sinkFile path
+            download request path = runConduitRes $ httpSource request getResponseBody
+                    .| sinkFile path
 
 alphaNumeric = ['a'..'z'] ++ ['A'..'Z'] ++ ['0'..'9']
 
@@ -348,8 +349,8 @@ sanitizeRootPath dirtyPath = do
 -- Given an RSS Entry, return a file name based purely on the URL of the entry
 getContentFileName :: RSSEntry -> String
 getContentFileName rssEntry = normalize_extension $ cleanBase $ cleanExt raw_file_name where
-    cleanBase raw_file_name = replaceBaseName  raw_file_name $ take 140 $ sanitizeForFileName $ takeBaseName raw_file_name
-    cleanExt raw_file_name  = replaceExtension raw_file_name $ take 10  $ sanitizeForFileName $ (tail . takeExtension) raw_file_name
+    cleanBase raw_file_name = replaceBaseName  raw_file_name $ P.take 140 $ sanitizeForFileName $ takeBaseName raw_file_name
+    cleanExt raw_file_name  = replaceExtension raw_file_name $ P.take 10  $ sanitizeForFileName $ (tail . takeExtension) raw_file_name
 
     -- let this error for now if a valid name can't be created (specifically expecting this for 
     -- extensions)
@@ -541,7 +542,7 @@ debug_entry_successes successRSSEntries = do
 -- Debug: Show errors in downloading rss files.
 debug_feed_file_errors :: [FeedSpecError] -> IO ()
 debug_feed_file_errors errorFeedSpecs = do
-    let showErr (feedSpec, error) = (feedName feedSpec, (take 100 $ show error) ++ "...")
+    let showErr (feedSpec, error) = (feedName feedSpec, (P.take 100 $ show error) ++ "...")
 
     putStrLn "\n"
     putStrLn $ "RSS Feed File Errors:\n" ++ (groom $ P.map showErr errorFeedSpecs)
@@ -551,7 +552,7 @@ debug_feed_file_errors errorFeedSpecs = do
 
 debug_entry_errors :: [RSSEntryError] -> IO ()
 debug_entry_errors errorRSSEntries = do
-    let showErr (entry, error) = (rssEntryURL entry, (take 100 $ show error) ++ "...")
+    let showErr (entry, error) = (rssEntryURL entry, (P.take 100 $ show error) ++ "...")
 
     putStrLn "\n"
     putStrLn $ "RSS Content File Errors:\n" ++ (groom $ P.map showErr errorRSSEntries)
