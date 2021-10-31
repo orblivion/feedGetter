@@ -2,8 +2,6 @@
 *.o
 *.swp
 /rss
-TODO
-feeds.yaml
 /.cabal-sandbox
 /cabal.sandbox.config
 /dist
